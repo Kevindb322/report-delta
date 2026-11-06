@@ -149,10 +149,12 @@ function calcAll(tempos) {
   return { rows, grand, any, overlaps, perTec, tecDays, km, anyKm };
 }
 // lista dos técnicos com horas, na ordem da equipe (quem não está mais na equipe vai no fim)
+// nomes dos técnicos em ordem alfabética (ignora acentos e maiúsculas)
+const sortNames = a => [...a].sort((x, y) => x.localeCompare(y, 'pt-BR', { sensitivity: 'base' }));
 function tecSummary(d, calc) {
   calc = calc || calcAll(d.tempos);
   const names = [...d.equipe, ...[...calc.perTec.keys()].filter(n => !d.equipe.includes(n))];
-  return names.filter(n => calc.perTec.get(n)).map(n => ({ nome: n, dias: (calc.tecDays.get(n) || new Set()).size, min: calc.perTec.get(n), diarias: calc.perTec.get(n) / 480 }));
+  return sortNames(names.filter(n => calc.perTec.get(n))).map(n => ({ nome: n, dias: (calc.tecDays.get(n) || new Set()).size, min: calc.perTec.get(n), diarias: calc.perTec.get(n) / 480 }));
 }
 // datas diferentes que têm horas (dias reais de obra; o fechamento é a cada 15 datas)
 const BLOCO_DATAS = 15;
@@ -344,7 +346,7 @@ function layoutDoc(d, imgs) {
     const domRow = sun => { const row = [isoToTxt(sun, false), 'DOMINGO', '', '', '', '', '', '']; row.special = 'domingo'; return row; };
     tRows.forEach((r, k) => {
       while (ai < autos.length && r.data && autos[ai] < r.data) lines.push(domRow(autos[ai++]));
-      const row = [isoToTxt(r.data, false), r.tecs.join(', '), fmt(r.ida), fmt(r.ini, true), fmt(r.fim, true), fmt(r.volta), hmStr(calc.rows[tIdx[k]].total), r.km || ''];
+      const row = [isoToTxt(r.data, false), sortNames(r.tecs).join(', '), fmt(r.ida), fmt(r.ini, true), fmt(r.fim, true), fmt(r.volta), hmStr(calc.rows[tIdx[k]].total), r.km || ''];
       if (rep.has(r.data)) row.fills = Object.fromEntries(cols.map((c, j) => [j, dc.map[r.data]]));
       if (isSunday(r.data)) row.colors = { 0: RED };
       lines.push(row);
@@ -814,7 +816,7 @@ function renderHoras() {
     const te = el('div', { class: 'total' }); totals[i] = te;
     const tecBtn = el('button', { type: 'button', class: 'tecbtn' + (r.tecs.length ? '' : ' empty') },
       el('span', { class: 'lbl' }, 'Técnicos presentes'),
-      el('span', { class: 'names' }, r.tecs.length ? r.tecs.join(', ') : (d.equipe.length ? 'Toque para marcar' : 'Cadastre a equipe primeiro')), el('span', { html: icon('down') }));
+      el('span', { class: 'names' }, r.tecs.length ? sortNames(r.tecs).join(', ') : (d.equipe.length ? 'Toque para marcar' : 'Cadastre a equipe primeiro')), el('span', { html: icon('down') }));
     tecBtn.addEventListener('click', () => pickTecs(r, () => { touch(); renderHoras(); agendaFechamento(); }));
     const head = el('h3', null, el('span', null, sunday ? 'DOMINGO' : 'Dia ' + (i + 1)), dl, porData[r.data] > 1 ? el('span', { class: 'dup', style: 'background:' + dcApp.map[r.data] }, 'mesma data em ' + porData[r.data] + ' linhas') : null, el('span', { class: 'grow' }),
       el('button', { class: 'del', type: 'button', html: icon('trash'), 'aria-label': 'Excluir', onclick: () => { d.tempos.splice(i, 1); touch(); renderHoras(); toast('Linha excluída.'); } }));

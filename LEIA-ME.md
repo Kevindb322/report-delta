@@ -1,4 +1,4 @@
-# App Rapport Deltafrigo
+# App Relatório Deltafrigo
 
 App único para **PC e celular**. Funciona como site instalável (PWA) publicado no GitHub Pages. Depois de instalado, funciona sem internet.
 
@@ -17,7 +17,7 @@ App único para **PC e celular**. Funciona como site instalável (PWA) publicado
   - Evite o Samsung Internet, porque ele bloqueia o envio de anexos.
 - **iPhone:** abra no Safari e use Compartilhar → **Adicionar à Tela de Início**.
 - **PC:** abra no Chrome ou no Edge e clique no ícone de instalar na barra de endereço.
-  - No primeiro "Salvar PDF", escolha a pasta onde os PDFs vão ficar (ex.: `Rapports Deltafrigo\Rapports`). O app lembra a pasta.
+  - No primeiro "Salvar PDF", escolha a pasta onde os PDFs vão ficar (ex.: a pasta dos relatórios da Deltafrigo). O app lembra a pasta.
 
 ## Atualizar depois de uma mudança
 
@@ -27,6 +27,6 @@ App único para **PC e celular**. Funciona como site instalável (PWA) publicado
 
 ## Importante
 
-- O site é público. Os rapports não vão para a internet: ficam só no aparelho de cada técnico.
-- Cada PDF leva os dados do rapport dentro dele. Com **"Abrir PDF ou JSON salvo…"** dá para reabrir e editar qualquer PDF, no PC ou no celular.
+- O site é público. Os relatórios não vão para a internet: ficam só no aparelho de cada técnico.
+- Cada PDF leva os dados do relatório dentro dele. Com **"Abrir PDF ou JSON salvo…"** dá para reabrir e editar qualquer PDF, no PC ou no celular.
 - Desinstalar o app ou limpar os dados do navegador apaga a lista do aparelho. Os PDFs salvos continuam onde estão.

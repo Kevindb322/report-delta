@@ -222,3 +222,4 @@ table.sum th:not(:first-child), table.sum td:not(:first-child) { text-align:righ
   .content { max-width:860px; }
   #prevPages { max-width:900px; }
 }
+.grand .datas { margin-top:6px; font-size:14px; font-weight:600; background:rgba(255,255,255,.14); border-radius:8px; padding:5px 9px; display:inline-block; }

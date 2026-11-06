@@ -1,10 +1,10 @@
 'use strict';
-/* Rapport Deltafrigo — app único para PC e celular (PWA).
+/* Relatório Deltafrigo — app único para PC e celular (PWA).
    O PDF é montado do zero (sem modelo fixo): as tabelas crescem conforme as linhas preenchidas e
-   as páginas são criadas sozinhas. O JSON do rapport vai embutido no PDF (chave RapportDeltafrigoData),
+   as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.2';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -84,10 +84,10 @@ const parseNum = v => { const s = String(v || '').trim().replace(/\./g, '').repl
            material[{qtd,desc,cod,preco}], sig{tecnico,cliente}, fileName } */
 function blankDoc() {
   return {
-    _programa: 'Rapport Deltafrigo', _versao: 1,
+    _programa: 'Relatório Deltafrigo', _versao: 1,
     head: { cliente: '', end1: '', end2: '', end3: '', data: todayISO(), obra: '', tecResp: pref('tecResp') || '',
             numero: todayISO().split('-').reverse().join(''), sistema: '' },
-    equipe: [], tempos: [], relatorio: [], material: [], sig: { tecnico: null, cliente: null }, fileName: ''
+    equipe: [], tempos: [], relatorio: [], material: [], sig: { tecnico: null, cliente: null }, fileName: '', avisoDatas: 0
   };
 }
 function normDoc(j) {                // aceita JSON de outra versão / incompleto
@@ -99,6 +99,7 @@ function normDoc(j) {                // aceita JSON de outra versão / incomplet
   d.material = (j.material || []).map(m => ({ qtd: m.qtd || '', desc: m.desc || '', cod: m.cod || '', preco: m.preco || '' }));
   d.sig = { tecnico: (j.sig || {}).tecnico || null, cliente: (j.sig || {}).cliente || null };
   d.fileName = j.fileName || '';
+  d.avisoDatas = +j.avisoDatas || 0;
   return d;
 }
 const emptyMat = m => !['qty', 'qtd', 'desc', 'cod', 'preco'].some(k => String(m[k] || '').trim());
@@ -144,8 +145,32 @@ function tecSummary(d, calc) {
   const names = [...d.equipe, ...[...calc.perTec.keys()].filter(n => !d.equipe.includes(n))];
   return names.filter(n => calc.perTec.get(n)).map(n => ({ nome: n, min: calc.perTec.get(n), diarias: calc.perTec.get(n) / 480 }));
 }
-function autoName(d) { return ['Rapport', d.head.cliente.trim(), d.head.numero.trim()].filter(Boolean).join(' '); }
-function fileNameOf(d) { return ((d.fileName || '').trim() || autoName(d)).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || 'Rapport'; }
+// datas diferentes que têm horas (dias reais de obra; o fechamento é a cada 15 datas)
+const BLOCO_DATAS = 15;
+function workDates(d, calc) {
+  calc = calc || calcAll(d.tempos);
+  return [...new Set(d.tempos.filter((r, i) => r.data && calc.rows[i].total !== null).map(r => r.data))].sort();
+}
+function marcoDatas(d) {                 // 15, 30, 45… ainda não perguntado; 0 = nada a perguntar
+  const n = workDates(d).length, m = Math.floor(n / BLOCO_DATAS) * BLOCO_DATAS;
+  if ((d.avisoDatas || 0) > m) d.avisoDatas = m;   // apagou dias: volta a perguntar quando completar de novo
+  return m >= BLOCO_DATAS && m > (d.avisoDatas || 0) ? m : 0;
+}
+let checkT = null;
+function agendaFechamento() { clearTimeout(checkT); checkT = setTimeout(perguntaFechamento, 700); }
+function perguntaFechamento() {
+  if (!cur || screen !== 'editor' || !$('sheet').hidden || !$('pad').hidden) return false;
+  const d = cur.doc, m = marcoDatas(d); if (!m) return false;
+  const ds = workDates(d);
+  openSheet([el('h2', { html: icon('check') + ' ' + m + ' dias fechados' }),
+    el('p', null, 'Este relatório já tem ' + ds.length + ' datas diferentes com horas (' + isoToTxt(ds[0], false) + ' a ' + isoToTxt(ds[ds.length - 1], false) + '). Vai acrescentar mais dias ou enviar o relatório?'),
+    el('div', { class: 'opts' },
+      opt('', 'plus', 'Acrescentar mais dias', 'Continua neste relatório. Pergunta de novo em ' + (m + BLOCO_DATAS) + ' datas', () => { d.avisoDatas = m; touch(); back(); }),
+      opt('main', 'send', 'Enviar o Relatório', 'Gera o PDF e abre as opções de envio', () => { d.avisoDatas = m; touch(); flushSave(); saveFlow(); }))]);
+  return true;
+}
+function autoName(d) { return ['Relatório', d.head.cliente.trim(), d.head.numero.trim()].filter(Boolean).join(' '); }
+function fileNameOf(d) { return ((d.fileName || '').trim() || autoName(d)).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || 'Relatório'; }
 
 /* ------------------------------------------------------------------ montagem das páginas
    layoutDoc() gera uma lista de páginas, cada uma com operações simples (texto, retângulo, linha, imagem)
@@ -392,8 +417,8 @@ async function buildPdf(d) {
       }
     }
   }
-  out.setTitle(fileNameOf(d)); out.setAuthor('Deltafrigo Ltda.'); out.setProducer('Rapport Deltafrigo ' + APP_VERSION); out.setLanguage('pt-BR');
-  const data = Object.assign({}, d, { _programa: 'Rapport Deltafrigo', _versao: 1, _app: APP_VERSION });
+  out.setTitle(fileNameOf(d)); out.setAuthor('Deltafrigo Ltda.'); out.setProducer('Relatório Deltafrigo ' + APP_VERSION); out.setLanguage('pt-BR');
+  const data = Object.assign({}, d, { _programa: 'Relatório Deltafrigo', _versao: 1, _app: APP_VERSION });
   out.getInfoDict().set(PDFName.of(DATA_KEY), PDFHexString.fromText(JSON.stringify(data)));
   return { bytes: await out.save(), pages: pages.length };
 }
@@ -402,7 +427,7 @@ async function readFileData(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const pdf = await PDFLib.PDFDocument.load(bytes, { updateMetadata: false });
   const v = pdf.getInfoDict().lookup(PDFLib.PDFName.of(DATA_KEY));
-  if (!v) throw new Error('este PDF não foi feito pelo Rapport Deltafrigo');
+  if (!v) throw new Error('este PDF não foi feito pelo Relatório Deltafrigo');
   return { data: JSON.parse(v.decodeText()), pdf: new Blob([bytes], { type: 'application/pdf' }) };
 }
 
@@ -430,7 +455,7 @@ const DB = {
     if (this.db) return Promise.resolve(this.db);
     return new Promise((res, rej) => {
       const r = indexedDB.open('rapportDeltafrigo', 1);
-      r.onupgradeneeded = () => { r.result.createObjectStore('rapports', { keyPath: 'id' }); r.result.createObjectStore('kv'); };
+      r.onupgradeneeded = () => { r.result.createObjectStore('relatórios', { keyPath: 'id' }); r.result.createObjectStore('kv'); };
       r.onsuccess = () => { this.db = r.result; res(this.db); }; r.onerror = () => rej(r.error);
     });
   },
@@ -441,9 +466,9 @@ const DB = {
       tr.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined); tr.onerror = () => rej(tr.error);
     });
   },
-  all() { return this.tx('rapports', 'readonly', st => st.getAll()); },
-  put(rec) { return this.tx('rapports', 'readwrite', st => st.put(rec)); },
-  del(id) { return this.tx('rapports', 'readwrite', st => st.delete(id)); },
+  all() { return this.tx('relatórios', 'readonly', st => st.getAll()); },
+  put(rec) { return this.tx('relatórios', 'readwrite', st => st.put(rec)); },
+  del(id) { return this.tx('relatórios', 'readwrite', st => st.delete(id)); },
   kget(k) { return this.tx('kv', 'readonly', st => st.get(k)); },
   kset(k, v) { return this.tx('kv', 'readwrite', st => st.put(v, k)); }
 };
@@ -472,7 +497,7 @@ function undo(what) {
 function applyStatic() {
   for (const e of document.querySelectorAll('[data-icon]')) if (!e.firstElementChild) e.insertAdjacentHTML('afterbegin', icon(e.dataset.icon));
   for (const e of document.querySelectorAll('[data-icon-before]')) if (!e.querySelector('svg')) e.insertAdjacentHTML('afterbegin', icon(e.dataset.iconBefore));
-  $('verInfo').textContent = 'Versão ' + APP_VERSION + (IS_PC ? ' · rapports guardados neste computador' : ' · os dados ficam neste celular');
+  $('verInfo').textContent = 'Versão ' + APP_VERSION + (IS_PC ? ' · relatórios guardados neste computador' : ' · os dados ficam neste celular');
   if (installEvt) { $('bInstall').hidden = false; $('bInstall').innerHTML = icon('phone') + 'Instalar como app'; }
 }
 
@@ -480,17 +505,17 @@ function applyStatic() {
 const IS_PC = 'showDirectoryPicker' in window && !/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 async function renderHome() {
   let recs = [];
-  try { recs = await DB.all(); } catch (e) { toast('Não foi possível ler os rapports guardados.', 'warn'); }
+  try { recs = await DB.all(); } catch (e) { toast('Não foi possível ler os relatórios guardados.', 'warn'); }
   recs.sort((a, b) => b.updated - a.updated);
   const list = $('list'); list.innerHTML = '';
   $('emptyList').hidden = recs.length > 0;
   const pend = recs.filter(r => r.status === 'saved').length;
   $('pendingBanner').hidden = !pend;
-  $('pendingBanner').innerHTML = icon('send') + '<span>' + (pend === 1 ? '1 rapport salvo e não enviado' : pend + ' rapports salvos e não enviados') + '</span>';
-  $('home').querySelector('.appbar small').textContent = recs.length ? plural(recs.length, 'rapport', 'rapports') : 'Relatórios de instalação ou reparos';
+  $('pendingBanner').innerHTML = icon('send') + '<span>' + (pend === 1 ? '1 relatório salvo e não enviado' : pend + ' relatórios salvos e não enviados') + '</span>';
+  $('home').querySelector('.appbar small').textContent = recs.length ? plural(recs.length, 'relatório', 'relatórios') : 'Relatórios de instalação ou reparos';
   for (const r of recs) {
     const d = r.doc, c = calcAll(d.tempos);
-    const sub = [isoToTxt(d.head.data, true), d.head.numero && ('Nº ' + d.head.numero), c.any && (hmStr(c.grand) + ' h'), d.equipe.length && plural(d.equipe.length, 'técnico', 'técnicos')].filter(Boolean).join(' · ');
+    const sub = [isoToTxt(d.head.data, true), d.head.numero && ('Nº ' + d.head.numero), c.any && plural(workDates(d, c).length, 'dia', 'dias'), c.any && (hmStr(c.grand) + ' h'), d.equipe.length && plural(d.equipe.length, 'técnico', 'técnicos')].filter(Boolean).join(' · ');
     const badge = r.status === 'sent' ? el('span', { class: 'badge sent' }, 'Enviado ' + fmtStamp(r.sentAt) + (r.sentVia ? ' · ' + VIA[r.sentVia] : ''))
       : r.status === 'saved' ? el('span', { class: 'badge saved' }, 'Salvo · não enviado') : el('span', { class: 'badge draft' }, 'Rascunho');
     const item = el('div', { class: 'item', role: 'button', tabindex: 0, onclick: () => itemMenu(r) },
@@ -529,12 +554,12 @@ async function duplicate(r) {
   const d = normDoc(JSON.parse(JSON.stringify(r.doc)));
   d.sig = { tecnico: null, cliente: null }; d.fileName = ''; d.head.data = todayISO(); d.head.numero = todayISO().split('-').reverse().join('');
   const rec = { id: newId(), created: Date.now(), updated: Date.now(), status: 'draft', doc: d, pdf: null };
-  await DB.put(rec); hideSheet(); replaceTop('editor'); openEditor(rec); toast('Rapport duplicado.');
+  await DB.put(rec); hideSheet(); replaceTop('editor'); openEditor(rec); toast('Relatório duplicado.');
 }
 function confirmDelete(r) {
-  openSheet([el('h2', null, 'Excluir este rapport?'), el('p', null, '"' + (r.doc.head.cliente.trim() || '(sem cliente)') + '" sai da lista. PDFs já salvos ou enviados não são apagados.'),
+  openSheet([el('h2', null, 'Excluir este relatório?'), el('p', null, '"' + (r.doc.head.cliente.trim() || '(sem cliente)') + '" sai da lista. PDFs já salvos ou enviados não são apagados.'),
     el('div', { class: 'opts' },
-      opt('danger', 'trash', 'Excluir', null, async () => { await DB.del(r.id); back(); renderHome(); toast('Rapport excluído.'); }),
+      opt('danger', 'trash', 'Excluir', null, async () => { await DB.del(r.id); back(); renderHome(); toast('Relatório excluído.'); }),
       opt('', 'back', 'Cancelar', null, back))]);
 }
 
@@ -573,7 +598,7 @@ function renderEditor() {
 function updateBadges() {
   if (!cur) return;
   const d = cur.doc, c = calcAll(d.tempos);
-  $('edTitle').textContent = d.head.cliente.trim() || 'Novo rapport';
+  $('edTitle').textContent = d.head.cliente.trim() || 'Novo relatório';
   $('edSub').textContent = (c.any ? hmStr(c.grand) + ' h · ' : '') + (cur.status === 'draft' ? 'salvo automaticamente' : cur.status === 'sent' ? 'enviado' : 'salvo · não enviado');
   $('cntEquipe').textContent = d.equipe.length || '';
   $('cntHoras').textContent = c.rows.filter(r => r.total !== null).length || '';
@@ -616,7 +641,7 @@ function renderDados() {
     card('note', 'Obra', el('div', { class: 'row2' }, el('label', { class: 'f' }, el('span', null, 'Data'), date), inp('Nº do relatório', h, 'numero', { inputmode: 'numeric' })),
       inp('Nº da obra', h, 'obra'), inp('Técnico responsável', h, 'tecResp', { list: dlNames(), cap: 'words', oninput: i => pref('tecResp', i.value.trim()) }),
       inp('Sistema / equipamento', h, 'sistema')),
-    card('file', 'Nome do arquivo', inp('Nome do PDF', d, 'fileName', { ph: autoName(d) }), el('p', { class: 'help' }, 'Em branco, usa "Rapport Cliente Nº".'))
+    card('file', 'Nome do arquivo', inp('Nome do PDF', d, 'fileName', { ph: autoName(d) }), el('p', { class: 'help' }, 'Em branco, usa "Relatório Cliente Nº".'))
   );
 }
 
@@ -672,7 +697,9 @@ function renderHoras() {
       te.innerHTML = '<span>Total da linha</span><span>' + (r.total !== null ? hmStr(r.total) : '—') + '</span>';
       te.classList.toggle('manual', r.total === null);
     });
+    const nd = workDates(d, c).length, falta = BLOCO_DATAS - (nd % BLOCO_DATAS);
     grand.innerHTML = '<small>Horas trabalhadas totais</small><div class="big">' + (c.any ? hmStr(c.grand) : '—') + '</div>' +
+      '<div class="datas">' + plural(nd, 'data trabalhada', 'datas trabalhadas') + (nd && falta < BLOCO_DATAS ? ' · ' + (falta === 1 ? 'falta 1' : 'faltam ' + falta) + ' para fechar ' + (nd + falta) : nd ? ' · fechou ' + nd : '') + '</div>' +
       (c.overlaps.length ? '<div class="ovl">Descontado por sobreposição no mesmo dia: ' + c.overlaps.map(o => hmStr(o.min) + ' em ' + (o.data ? isoToTxt(o.data, false) : '?')).join(', ') + ' (só aparece aqui, não no PDF)</div>'
         : '<small>Soma das linhas. No mesmo dia, horários que se sobrepõem contam uma vez.</small>');
     summary.innerHTML = ''; const sc = tecSummaryCard(); if (sc) summary.append(sc);
@@ -691,10 +718,10 @@ function renderHoras() {
     const tecBtn = el('button', { type: 'button', class: 'tecbtn' + (r.tecs.length ? '' : ' empty') },
       el('span', { class: 'lbl' }, 'Técnicos presentes'),
       el('span', { class: 'names' }, r.tecs.length ? r.tecs.join(', ') : (d.equipe.length ? 'Toque para marcar' : 'Cadastre a equipe primeiro')), el('span', { html: icon('down') }));
-    tecBtn.addEventListener('click', () => pickTecs(r, () => { touch(); renderHoras(); }));
+    tecBtn.addEventListener('click', () => pickTecs(r, () => { touch(); renderHoras(); agendaFechamento(); }));
     const head = el('h3', null, el('span', null, 'Dia ' + (i + 1)), dl, el('span', { class: 'grow' }),
       el('button', { class: 'del', type: 'button', html: icon('trash'), 'aria-label': 'Excluir', onclick: () => { d.tempos.splice(i, 1); touch(); renderHoras(); toast('Linha excluída.'); } }));
-    list.append(el('div', { class: 'card' }, head,
+    list.append(el('div', { class: 'card', onfocusout: agendaFechamento, onchange: agendaFechamento }, head,
       el('label', { class: 'f' }, el('span', null, 'Data'), date), tecBtn,
       el('div', { class: 'row2' }, inp('Viagem ida (h)', r, 'ida', { inputmode: 'numeric', ph: '00:00', hm: 'dur', oninput: refresh }),
         inp('Viagem volta (h)', r, 'volta', { inputmode: 'numeric', ph: '00:00', hm: 'dur', oninput: refresh })),
@@ -704,10 +731,11 @@ function renderHoras() {
   });
   const add = el('button', { class: 'add', type: 'button', html: icon('plus') + '<span>Adicionar dia</span>' });
   add.addEventListener('click', () => {
+    if (perguntaFechamento()) return;          // completou 15 datas: pergunta antes de abrir mais um dia
     const last = d.tempos[d.tempos.length - 1];
     d.tempos.push({ data: last && last.data ? addDays(last.data, 1) : (d.head.data || todayISO()), tecs: last ? last.tecs.slice() : d.equipe.slice(),
       ida: '', ini: last ? last.ini : '', fim: last ? last.fim : '', volta: '', km: '' });
-    touch(); renderHoras();
+    touch(); renderHoras(); agendaFechamento();
     const cards = $('tab-horas').querySelectorAll('.card'); const c = cards[d.tempos.length - 1]; if (c) c.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   box.append(...[grand, d.tempos.length ? null : el('div', { class: 'info' }, 'Um cartão por dia. "Adicionar dia" já avança a data e copia os técnicos e o horário do dia anterior. Só as linhas com horas saem no PDF.'),
@@ -804,7 +832,7 @@ $('fSig').addEventListener('change', async e => {
   c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
   const png = c.toDataURL('image/png'); pref('sig', png);
   if (cur) { cur.doc.sig.tecnico = png; touch(); renderAssinar(); }
-  toast('Imagem guardada neste aparelho e colocada no rapport.');
+  toast('Imagem guardada neste aparelho e colocada no relatório.');
 });
 
 /* ------------------------------------------------------------------ quadro de assinatura */
@@ -927,7 +955,7 @@ async function getDir(ask) {
 async function renderFolderInfo() {
   const b = $('folderInfo'); if (!b) return; b.hidden = !IS_PC; if (!IS_PC) return;
   let h = null; try { h = await DB.kget('dir'); } catch (e) {}
-  b.innerHTML = ''; b.append(el('span', { html: icon('folder') }), el('span', null, h ? 'PDFs salvos na pasta "' + h.name + '"' : 'Ao salvar o primeiro PDF, escolha a pasta (ex.: Rapports Deltafrigo)'),
+  b.innerHTML = ''; b.append(el('span', { html: icon('folder') }), el('span', null, h ? 'PDFs salvos na pasta "' + h.name + '"' : 'Ao salvar o primeiro PDF, escolha a pasta (ex.: a pasta dos relatórios da Deltafrigo)'),
     el('button', { type: 'button', onclick: async () => { try { const n = await window.showDirectoryPicker({ id: 'rapportsDeltafrigo', mode: 'readwrite' }); await DB.kset('dir', n); renderFolderInfo(); toast('Pasta trocada para "' + n.name + '".'); } catch (e) {} } }, h ? 'Trocar' : 'Escolher'));
 }
 async function saveToDevice(rec, again, dir) {
@@ -973,7 +1001,7 @@ function askSend(rec, direct, saved) {
       opt('', 'later', 'Mais tarde', 'Fica na lista como "não enviado"', () => later(rec)))]);
 }
 function goHome() { const n = stack.length - 1; if (n > 0) history.go(-n); }
-function later(rec) { goHome(); toast('Ok. O rapport fica na lista para enviar depois.'); }
+function later(rec) { goHome(); toast('Ok. O relatório fica na lista para enviar depois.'); }
 // plain = true: manda só o arquivo, sem título/texto (alguns navegadores recusam arquivo + texto)
 async function share(rec, via, plain) {
   const file = new File([rec.pdf], fileNameOf(rec.doc) + '.pdf', { type: 'application/pdf' });
@@ -981,7 +1009,7 @@ async function share(rec, via, plain) {
   if (via !== 'other') toast('Escolha ' + VIA[via] + ' na lista que abrir.', '', 2500);
   const h = rec.doc.head;
   const data = plain ? { files: [file] }
-    : { files: [file], title: fileNameOf(rec.doc), text: 'Rapport Deltafrigo – ' + [h.cliente.trim(), isoToTxt(h.data, true), h.numero && 'Nº ' + h.numero].filter(Boolean).join(' – ') };
+    : { files: [file], title: fileNameOf(rec.doc), text: 'Relatório Deltafrigo – ' + [h.cliente.trim(), isoToTxt(h.data, true), h.numero && 'Nº ' + h.numero].filter(Boolean).join(' – ') };
   try { await navigator.share(data); }
   catch (e) { if (e.name === 'AbortError') return; console.warn('share', e); shareFail(rec, via, e, plain); return; }
   markSent(rec, via);
@@ -990,7 +1018,7 @@ async function markSent(rec, via) {
   rec.status = 'sent'; rec.sentAt = Date.now(); rec.sentVia = via; await DB.put(rec);
   if (cur && cur.id === rec.id) { cur.status = 'sent'; updateBadges(); }
   goHome(); setTimeout(renderHome, 250);
-  toast('Rapport enviado.');
+  toast('Relatório enviado.');
 }
 function shareFail(rec, via, e, final) {
   $('toast').className = '';
@@ -1001,7 +1029,7 @@ function shareFail(rec, via, e, final) {
     el('p', null, 'O PDF "' + fileNameOf(rec.doc) + '.pdf" já está salvo. Dá para anexar à mão no WhatsApp, Telegram ou e-mail.'),
     el('div', { class: 'opts' },
       final ? null : opt('main', 'send', 'Tentar de novo (só o PDF)', 'Manda só o arquivo, sem o texto da mensagem', () => share(rec, via, true)),
-      opt('', 'check', 'Já enviei à mão', 'Marca o rapport como enviado', () => markSent(rec, 'manual')),
+      opt('', 'check', 'Já enviei à mão', 'Marca o relatório como enviado', () => markSent(rec, 'manual')),
       opt('', 'later', 'Mais tarde', 'Fica na lista como "não enviado"', () => later(rec)))]);
 }
 
@@ -1019,7 +1047,7 @@ $('scrim').addEventListener('click', back);
 async function importFile(f) {
   try {
     const { data, pdf } = await readFileData(f);
-    if (!data || !data.head) throw new Error('o arquivo não tem dados de rapport');
+    if (!data || !data.head) throw new Error('o arquivo não tem dados de relatório');
     const rec = { id: newId(), created: Date.now(), updated: Date.now(), status: pdf ? 'saved' : 'draft', doc: normDoc(data), pdf };
     await DB.put(rec); push('editor'); tab = 'dados'; openEditor(rec); toast('"' + f.name + '" aberto.');
   } catch (err) { console.error(err); toast('Não foi possível abrir "' + f.name + '": ' + err.message, 'warn', 6000); }
@@ -1049,7 +1077,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
   const askUpdate = (reg, w) => {
     if (!navigator.serviceWorker.controller || !$('sheet').hidden) return;
-    openSheet([el('h2', null, 'Versão nova disponível'), el('p', null, 'Atualizar agora? Os rapports guardados continuam.'),
+    openSheet([el('h2', null, 'Versão nova disponível'), el('p', null, 'Atualizar agora? Os relatórios guardados continuam.'),
       el('div', { class: 'opts' }, opt('main', 'check', 'Atualizar', null, () => { (reg.waiting || w).postMessage('skip'); }), opt('', 'later', 'Mais tarde', null, back))]);
   };
   navigator.serviceWorker.register('sw.js').then(reg => {

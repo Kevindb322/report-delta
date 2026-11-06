@@ -224,3 +224,17 @@ table.sum th:not(:first-child), table.sum td:not(:first-child) { text-align:righ
 }
 .grand .datas { margin-top:6px; font-size:14px; font-weight:600; background:rgba(255,255,255,.14); border-radius:8px; padding:5px 9px; display:inline-block; }
 .card h3 .dup { font-size:12px; font-weight:600; color:var(--navy); background:#e2e7f6; border-radius:10px; padding:3px 8px; }
+
+.appbar .icon.menu { margin-left:0; margin-right:-6px; }
+.appbar .icon.menu svg circle { fill:currentColor; }
+.banner.upd { width:100%; text-align:left; background:#e3f3e7; color:#16652f; display:flex; align-items:center; gap:10px; font:inherit; border:0; cursor:pointer; }
+.banner.upd svg { flex:none; }
+.card.sunday { border:2px solid #d93025; background:#fff4f3; }
+.card.sunday h3 { color:#b3261e; }
+.card.sunday.virtual { border-style:dashed; background:#fff8f7; }
+.domcheck { display:flex; align-items:center; gap:10px; font-weight:700; color:#b3261e; padding:10px 4px 12px; font-size:16px; }
+.domcheck input { width:22px; height:22px; accent-color:#d93025; }
+.sheet h2.red { color:#b3261e; }
+.sheet .bigwarn { font-size:20px; font-weight:800; color:#b3261e; line-height:1.3; background:#fdecea; border-radius:12px; padding:14px; text-align:center; }
+.sheet .helpdev { font-size:17px; color:var(--ink); }
+.sheet .helpjoke { font-style:italic; color:var(--muted); }

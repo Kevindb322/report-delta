@@ -9,8 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Relatório Delta">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons2/dl-192.png">
+<link rel="apple-touch-icon" href="icons2/dl-180.png">
 <title>Relatório Deltafrigo</title>
 <link rel="stylesheet" href="app.css">
 </head>
@@ -19,10 +19,12 @@
 <!-- ===================== INÍCIO: lista de relatórios ===================== -->
 <section id="home" class="screen">
   <header class="appbar">
-    <img class="applogo" src="icons/icon-192.png" alt="">
+    <img class="applogo" src="icons2/dl-192.png" alt="">
     <div class="title"><b>Relatório Deltafrigo</b><small></small></div>
+    <button class="icon menu" id="bMenu" data-icon="dots" aria-label="Menu"></button>
   </header>
   <div class="content">
+    <button id="updBanner" class="banner upd" hidden></button>
     <button id="bInstall" class="install" hidden></button>
     <div id="folderInfo" class="banner folder" hidden></div>
     <div id="pendingBanner" class="banner" hidden></div>

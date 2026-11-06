@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.6';
+const APP_VERSION = '1.0.8';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -32,7 +32,10 @@ const ICONS = {
   down: '<path d="M6 9l6 6 6-6"/>', alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>', later: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  up: '<path d="M18 15l-6-6-6 6"/>'
+  up: '<path d="M18 15l-6-6-6 6"/>',
+  dots: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.2-2.4 3.7M12 17h.01"/>'
 };
 function icon(n) { return '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[n] || '') + '</svg>'; }
 function el(tag, props, ...kids) {
@@ -94,7 +97,9 @@ function normDoc(j) {                // aceita JSON de outra versão / incomplet
   const d = blankDoc();
   Object.assign(d.head, j.head || {});
   d.equipe = Array.isArray(j.equipe) ? j.equipe.map(String) : [];
-  d.tempos = (j.tempos || []).map(r => ({ data: r.data || '', tecs: Array.isArray(r.tecs) ? r.tecs.map(String) : [], ida: r.ida || '', ini: r.ini || '', fim: r.fim || '', volta: r.volta || '', km: r.km || '' }));
+  d.tempos = (j.tempos || []).map(r => ({ data: r.data || '', tecs: Array.isArray(r.tecs) ? r.tecs.map(String) : [], ida: r.ida || '', ini: r.ini || '', fim: r.fim || '', volta: r.volta || '', km: r.km || '',
+    // relatórios de antes da 1.0.8: domingo que já tinha horas é considerado trabalhado
+    domTrab: r.domTrab !== undefined ? !!r.domTrab : !!(isSunday(r.data) && (r.ini || r.fim || r.ida || r.volta)) }));
   d.relatorio = (j.relatorio || []).map(String);
   d.material = (j.material || []).map(m => ({ qtd: m.qtd || '', desc: m.desc || '', cod: m.cod || '', preco: m.preco || '' }));
   d.sig = { tecnico: (j.sig || {}).tecnico || null, cliente: (j.sig || {}).cliente || null };
@@ -106,7 +111,11 @@ const emptyMat = m => !['qty', 'qtd', 'desc', 'cod', 'preco'].some(k => String(m
 function trimEnd(a, isEmpty) { let n = a.length; while (n > 0 && isEmpty(a[n - 1])) n--; return a.slice(0, n); }
 
 // total da linha = (fim − início, passando da meia-noite se preciso) + viagem de ida + viagem de volta
+// domingos: só contam horas quando marcados como "DOMINGO trabalhado"
+const isSunday = iso => !!iso && new Date(iso + 'T12:00:00').getDay() === 0;
+const isSaturday = iso => !!iso && new Date(iso + 'T12:00:00').getDay() === 6;
 function rowCalc(r) {
+  if (isSunday(r.data) && !r.domTrab) return { work: null, S: null, travel: 0, total: null };
   const S = num(parseT(r.ini, true)), E = num(parseT(r.fim, true)), OB = num(parseT(r.ida)), RT = num(parseT(r.volta));
   let work = null; if (S !== null && E !== null) { work = E - S; if (work < 0) work += 1440; }
   const travel = (OB || 0) + (RT || 0);
@@ -147,9 +156,17 @@ function tecSummary(d, calc) {
 }
 // datas diferentes que têm horas (dias reais de obra; o fechamento é a cada 15 datas)
 const BLOCO_DATAS = 15;
+function workedSet(d, calc) { calc = calc || calcAll(d.tempos); return new Set(d.tempos.filter((r, i) => r.data && calc.rows[i].total !== null).map(r => r.data)); }
+// domingo não trabalhado entre um sábado e uma segunda trabalhados: conta para a quinzena e sai no PDF como DOMINGO
+function autoSundays(d, calc) {
+  const w = workedSet(d, calc), out = [];
+  for (const dt of w) if (isSaturday(dt)) { const sun = addDays(dt, 1); if (w.has(addDays(dt, 2)) && !w.has(sun) && !d.tempos.some(r => r.data === sun && r.domTrab)) out.push(sun); }
+  return out.sort();
+}
+// datas que contam para o fechamento: dias com horas + domingos automáticos
 function workDates(d, calc) {
   calc = calc || calcAll(d.tempos);
-  return [...new Set(d.tempos.filter((r, i) => r.data && calc.rows[i].total !== null).map(r => r.data))].sort();
+  return [...new Set([...workedSet(d, calc), ...autoSundays(d, calc)])].sort();
 }
 function marcoDatas(d) {                 // 15, 30, 45… ainda não perguntado; 0 = nada a perguntar
   const n = workDates(d).length, m = Math.floor(n / BLOCO_DATAS) * BLOCO_DATAS;
@@ -176,7 +193,14 @@ function fileNameOf(d) { return ((d.fileName || '').trim() || autoName(d)).repla
    layoutDoc() gera uma lista de páginas, cada uma com operações simples (texto, retângulo, linha, imagem)
    em pontos, com origem no canto de cima à esquerda. O PDF e a visualização usam a mesma lista,
    então a tela mostra exatamente o que sai no PDF. */
-const BLUE = '#1c2a8a', INK = '#000000', LBL = '#2b3a9c', SHADE = '#e2e7f6';
+const BLUE = '#1c2a8a', INK = '#000000', LBL = '#2b3a9c', RED = '#b3261e';
+// uma cor para cada data repetida (na ordem das datas), no PDF e no app
+const DUP_COLORS = ['#dbe4fb', '#fde6c8', '#d9f0de', '#f7dcec', '#e6defa', '#d6eff2', '#f3efc9', '#f9dcd6'];
+function dupColors(tempos, onlyIdx) {
+  const cnt = {}; tempos.forEach((r, i) => { if (r.data && (!onlyIdx || onlyIdx.has(i))) cnt[r.data] = (cnt[r.data] || 0) + 1; });
+  const map = {}; Object.keys(cnt).filter(k => cnt[k] > 1).sort().forEach((k, j) => { map[k] = DUP_COLORS[j % DUP_COLORS.length]; });
+  return { map, cnt };
+}
 const ML = 37.5, MR = PW - 37.5, CW = MR - ML, BOTTOM = PH - 34;
 const FS = 8.5;                      // tamanho do texto nas tabelas
 function fnt(f) { return FONTS[f || 'R']; }
@@ -283,6 +307,14 @@ function layoutDoc(d, imgs) {
       const tail = ri === rows.length - 1 ? (opts.after || 0) : 0;
       if (!room(m.h + gap + tail)) { newPage(); heading(title + ' (continuação)', headH + 1 + m.h); drawHead(); }
       let x = ML;
+      if (cells.special === 'domingo') {           // data + uma célula só, cortada, com a palavra DOMINGO
+        const c0 = cols[0]; R(x, y, c0.w, m.h); T(x + c0.w / 2, y + m.h / 2 + FS * 0.36, cells[0], FS, { a: 'c', c: RED });
+        const x1 = x + c0.w + gap, w1 = MR - x1, cy = y + m.h / 2;
+        R(x1, y, w1, m.h, { fill: '#fdf0ef' }); L(x1 + 3, cy, x1 + w1 - 3, cy, { lw: 0.8, c: RED });
+        const tw0 = tw('DOMINGO', 8.5, 'B') + 14; R(x1 + w1 / 2 - tw0 / 2, cy - 5.5, tw0, 11, { fill: '#fdf0ef', stroke: '' });
+        T(x1 + w1 / 2, cy + 3.1, 'DOMINGO', 8.5, { f: 'B', a: 'c', c: RED });
+        y += m.h + gap; return;
+      }
       cells.forEach((s, i) => {
         const c = cols[i]; R(x, y, c.w, m.h, { fill: (cells.fills && cells.fills[i]) || c.fill || null });
         const ls = m.lines[i];
@@ -290,7 +322,7 @@ function layoutDoc(d, imgs) {
           if (!l) return;
           const size = c.wrap ? FS : fitSize(l, FS, c.w - 4, 'R', 5);
           const lh = FS + 1.6, top = y + (m.h - ls.length * lh) / 2;
-          T(c.a === 'c' ? x + c.w / 2 : c.a === 'r' ? x + c.w - 2.5 : x + 2.5, top + li * lh + lh / 2 + FS * 0.36, l, size, { a: c.a });
+          T(c.a === 'c' ? x + c.w / 2 : c.a === 'r' ? x + c.w - 2.5 : x + 2.5, top + li * lh + lh / 2 + FS * 0.36, l, size, { a: c.a, c: (cells.colors && cells.colors[i]) || INK, f: (cells.colors && cells.colors[i]) ? 'B' : 'R' });
         });
         x += c.w + gap;
       });
@@ -306,13 +338,19 @@ function layoutDoc(d, imgs) {
     const cols = [{ w: 44, h: 'Data', a: 'c' }, { h: 'Técnicos', wrap: true }, { w: 44, h: 'Viagem\nida (h)', a: 'c' }, { w: 40, h: 'Início\ntrabalho', a: 'c' },
       { w: 40, h: 'Fim\ntrabalho', a: 'c' }, { w: 44, h: 'Viagem\nvolta (h)', a: 'c' }, { w: 46, h: 'Total\nhoras', a: 'c' }, { w: 46, h: 'Km ida\ne volta', a: 'c' }];
     const fmt = (v, clock) => { const m = parseT(v, clock); return m === null || Number.isNaN(m) ? String(v || '') : hmStr(m); };
-    const cnt = {}; tRows.forEach(r => { if (r.data) cnt[r.data] = (cnt[r.data] || 0) + 1; });
-    const rep = new Set(Object.keys(cnt).filter(k => cnt[k] > 1));
-    table('Tempos', cols, tRows.map((r, k) => {
+    const dc = dupColors(tRows), rep = new Set(Object.keys(dc.map));
+    const autos = autoSundays(d, calc), lines = []; let ai = 0;
+    const domRow = sun => { const row = [isoToTxt(sun, false), 'DOMINGO', '', '', '', '', '', '']; row.special = 'domingo'; return row; };
+    tRows.forEach((r, k) => {
+      while (ai < autos.length && r.data && autos[ai] < r.data) lines.push(domRow(autos[ai++]));
       const row = [isoToTxt(r.data, false), r.tecs.join(', '), fmt(r.ida), fmt(r.ini, true), fmt(r.fim, true), fmt(r.volta), hmStr(calc.rows[tIdx[k]].total), r.km || ''];
-      if (rep.has(r.data)) row.fills = { 0: SHADE, 1: SHADE };
-      return row;
-    }), { after: 20 });
+      if (rep.has(r.data)) row.fills = Object.fromEntries(cols.map((c, j) => [j, dc.map[r.data]]));
+      if (isSunday(r.data)) row.colors = { 0: RED };
+      lines.push(row);
+    });
+    while (ai < autos.length) lines.push(domRow(autos[ai++]));
+    const domTrab = tRows.some(r => isSunday(r.data));
+    table('Tempos', cols, lines, { after: 20 });
     // linha "Horas trabalhadas totais"
     const xTot = ML + cols.slice(0, 6).reduce((s, c) => s + c.w + 1.6, 0);
     T(ML, y + 11, 'Horas trabalhadas totais', 8.5, { f: 'I', c: LBL, u: true });
@@ -322,6 +360,8 @@ function layoutDoc(d, imgs) {
     // explica datas repetidas e o desconto de horários sobrepostos
     const notes = [];
     if (rep.size) notes.push('Datas destacadas: mais de uma linha no mesmo dia (' + [...rep].sort().map(x => isoToTxt(x, false).slice(0, 5)).join(', ') + '), porque nem todos os técnicos trabalharam o mesmo horário. Cada técnico soma só as linhas em que está marcado.');
+    if (autos.length) notes.push('DOMINGO: domingo não trabalhado entre um sábado e uma segunda trabalhados. Conta para o fechamento da quinzena.');
+    if (domTrab) notes.push('Data em vermelho: domingo trabalhado.');
     if (calc.overlaps.length) notes.push('Nas Horas trabalhadas totais, horários que se sobrepõem no mesmo dia contam uma vez (horas de obra): descontado ' + calc.overlaps.map(o => hmStr(o.min) + ' em ' + (o.data ? isoToTxt(o.data, false).slice(0, 5) : '?')).join(', ') + '.');
     for (const n of notes) {
       const ls = wrap(n, 7.2, CW, 'I');
@@ -512,10 +552,21 @@ window.addEventListener('popstate', e => {
   const target = e.state && typeof e.state.idx === 'number' ? e.state.idx : 0;
   while (stack.length - 1 > target) undo(stack.pop());
 });
+let previewFromList = false;
+// da visualização (ou de uma folha aberta sobre ela) para o editor
+function toEditor(after) {
+  if (screen === 'preview' && previewFromList) {
+    const sheetOpen = !$('sheet').hidden; if (sheetOpen) history.back();
+    setTimeout(() => { previewFromList = false; replaceTop('editor'); showScreen('editor'); showTab(tab); if (after) after(); }, sheetOpen ? 350 : 0);
+  } else { history.go(screen === 'preview' ? -2 : -1); if (after) setTimeout(after, 350); }
+}
 function undo(what) {
   if (what === 'sheet') hideSheet();
   else if (what === 'pad') hidePad();
-  else if (what === 'preview') showScreen('editor');
+  else if (what === 'preview') {
+    if (previewFromList) { previewFromList = false; flushSave(); cur = null; renderHome(); showScreen('home'); }   // veio da lista: volta para a lista
+    else showScreen('editor');
+  }
   else if (what === 'editor') { flushSave(); cur = null; renderHome(); showScreen('home'); }
 }
 function applyStatic() {
@@ -562,7 +613,7 @@ function itemMenu(r) {
     el('p', null, fileNameOf(r.doc) + '.pdf'),
     el('div', { class: 'opts' },
       opt('main', 'edit', 'Abrir e editar', null, () => { hideSheet(); replaceTop('editor'); openEditor(r); }),
-      opt('', 'eye', 'Visualizar', 'Mostra as páginas como saem no PDF', () => { hideSheet(); replaceTop('editor'); openEditor(r); push('preview'); showScreen('preview'); renderPreview(); }),
+      opt('', 'eye', 'Visualizar', 'Mostra as páginas como saem no PDF', () => { hideSheet(); replaceTop('preview'); previewFromList = true; openEditor(r); showScreen('preview'); renderPreview(); }),
       r.pdf && r.status !== 'draft' && opt('', 'send', 'Enviar', r.status === 'sent' ? 'Já foi enviado; dá para enviar de novo' : null, () => askSend(r, true)),
       (!r.pdf || r.status === 'draft') && opt('', 'save', 'Salvar PDF e enviar', null, () => { hideSheet(); replaceTop('editor'); openEditor(r); saveFlow(); }),
       r.pdf && opt('', 'save', IS_PC ? 'Salvar o PDF de novo' : 'Baixar o PDF de novo', null, async () => { const x = await saveToDevice(r, true); if (x.ok) { back(); toast(savedMsg(x, fileNameOf(r.doc) + '.pdf')); } }),
@@ -723,17 +774,37 @@ function renderHoras() {
     });
     const nd = workDates(d, c).length, falta = BLOCO_DATAS - (nd % BLOCO_DATAS);
     grand.innerHTML = '<small>Horas trabalhadas totais</small><div class="big">' + (c.any ? hmStr(c.grand) : '—') + '</div>' +
-      '<div class="datas">' + plural(nd, 'data trabalhada', 'datas trabalhadas') + (nd && falta < BLOCO_DATAS ? ' · ' + (falta === 1 ? 'falta 1' : 'faltam ' + falta) + ' para fechar ' + (nd + falta) : nd ? ' · fechou ' + nd : '') + '</div>' +
+      '<div class="datas">' + plural(nd, 'data na quinzena', 'datas na quinzena') + (nd && falta < BLOCO_DATAS ? ' · ' + (falta === 1 ? 'falta 1' : 'faltam ' + falta) + ' para fechar ' + (nd + falta) : nd ? ' · fechou ' + nd : '') + '</div>' +
       (c.overlaps.length ? '<div class="ovl">Descontado por sobreposição no mesmo dia: ' + c.overlaps.map(o => hmStr(o.min) + ' em ' + (o.data ? isoToTxt(o.data, false) : '?')).join(', ') + '</div>'
         : '<small>Soma das linhas. No mesmo dia, horários que se sobrepõem contam uma vez.</small>');
     summary.innerHTML = ''; const sc = tecSummaryCard(); if (sc) summary.append(sc);
     updateBadges();
   };
-  const porData = {}; d.tempos.forEach(r => { if (r.data) porData[r.data] = (porData[r.data] || 0) + 1; });
+  const dcApp = dupColors(d.tempos), porData = dcApp.cnt;
+  const autos = autoSundays(d).filter(sun => !d.tempos.some(r => r.data === sun)); let ai = 0;   // domingo já lançado aparece no próprio cartão
+  const domCheck = (checked, onchange) => {
+    const cb = el('input', { type: 'checkbox' }); cb.checked = checked; cb.addEventListener('change', () => onchange(cb.checked));
+    return el('label', { class: 'domcheck' }, cb, el('span', null, 'DOMINGO trabalhado'));
+  };
+  const virtualCard = sun => el('div', { class: 'card sunday virtual' },
+    el('h3', null, el('span', null, 'DOMINGO'), el('span', { class: 'dl' }, isoToTxt(sun, false))),
+    el('p', { class: 'help' }, 'Não trabalhado. Conta para o fechamento da quinzena (sábado e segunda foram trabalhados) e sai no PDF como DOMINGO.'),
+    domCheck(false, v => {
+      if (!v) return;
+      let at = d.tempos.findIndex(x => x.data && x.data > sun); if (at < 0) at = d.tempos.length;
+      d.tempos.splice(at, 0, { data: sun, tecs: [], ida: '', ini: '', fim: '', volta: '', km: '', domTrab: true });
+      touch(); renderHoras(); alertaDomingo();
+    }));
   d.tempos.forEach((r, i) => {
+    while (ai < autos.length && r.data && autos[ai] < r.data) list.append(virtualCard(autos[ai++]));
+    const sunday = isSunday(r.data);
     const date = el('input', { type: 'date', value: r.data || '' });
     const dl = el('span', { class: 'dl' }, r.data ? isoToTxt(r.data, false) : '');
-    date.addEventListener('change', () => { r.data = date.value; touch(); renderHoras(); agendaFechamento(); });
+    date.addEventListener('change', () => {
+      const was = isSunday(r.data); r.data = date.value;
+      if (isSunday(r.data) && !was) { r.domTrab = false; r.tecs = []; r.ida = r.ini = r.fim = r.volta = ''; toast('Domingo: marque "DOMINGO trabalhado" se houve trabalho.'); }
+      touch(); renderHoras(); agendaFechamento();
+    });
     const time = (lbl, key) => {
       const ti = el('input', { type: 'time', value: r[key] || '', step: 60 });
       ti.addEventListener('input', () => { r[key] = ti.value; touch(); refresh(); });
@@ -744,29 +815,48 @@ function renderHoras() {
       el('span', { class: 'lbl' }, 'Técnicos presentes'),
       el('span', { class: 'names' }, r.tecs.length ? r.tecs.join(', ') : (d.equipe.length ? 'Toque para marcar' : 'Cadastre a equipe primeiro')), el('span', { html: icon('down') }));
     tecBtn.addEventListener('click', () => pickTecs(r, () => { touch(); renderHoras(); agendaFechamento(); }));
-    const head = el('h3', null, el('span', null, 'Dia ' + (i + 1)), dl, porData[r.data] > 1 ? el('span', { class: 'dup' }, 'mesma data em ' + porData[r.data] + ' linhas') : null, el('span', { class: 'grow' }),
+    const head = el('h3', null, el('span', null, sunday ? 'DOMINGO' : 'Dia ' + (i + 1)), dl, porData[r.data] > 1 ? el('span', { class: 'dup', style: 'background:' + dcApp.map[r.data] }, 'mesma data em ' + porData[r.data] + ' linhas') : null, el('span', { class: 'grow' }),
       el('button', { class: 'del', type: 'button', html: icon('trash'), 'aria-label': 'Excluir', onclick: () => { d.tempos.splice(i, 1); touch(); renderHoras(); toast('Linha excluída.'); } }));
-    list.append(el('div', { class: 'card', onfocusout: agendaFechamento, onchange: agendaFechamento }, head,
-      el('label', { class: 'f' }, el('span', null, 'Data'), date), tecBtn,
-      el('div', { class: 'row2' }, inp('Viagem ida (h)', r, 'ida', { inputmode: 'numeric', ph: '00:00', hm: 'dur', oninput: refresh }),
-        inp('Viagem volta (h)', r, 'volta', { inputmode: 'numeric', ph: '00:00', hm: 'dur', oninput: refresh })),
-      el('div', { class: 'row2' }, time('Início do trabalho', 'ini'), time('Fim do trabalho', 'fim')),
-      inp('Km ida e volta', r, 'km', { inputmode: 'decimal' }),
-      te));
+    const dchk = sunday ? domCheck(!!r.domTrab, v => {
+      r.domTrab = v;
+      if (v) { r.tecs = []; r.ida = r.ini = r.fim = r.volta = ''; }   // técnicos e horas ficam em branco até o usuário definir
+      touch(); renderHoras(); agendaFechamento(); if (v) alertaDomingo();
+    }) : null;
+    const fields = !sunday || r.domTrab;
+    list.append(el('div', { class: 'card' + (sunday ? ' sunday' : ''), onfocusout: agendaFechamento, onchange: agendaFechamento }, head,
+      el('label', { class: 'f' }, el('span', null, 'Data'), date), dchk,
+      fields ? [tecBtn,
+        el('div', { class: 'row2' }, inp('Viagem ida (h)', r, 'ida', { inputmode: 'numeric', ph: '00:00', hm: 'dur', oninput: refresh }),
+          inp('Viagem volta (h)', r, 'volta', { inputmode: 'numeric', ph: '00:00', hm: 'dur', oninput: refresh })),
+        el('div', { class: 'row2' }, time('Início do trabalho', 'ini'), time('Fim do trabalho', 'fim')),
+        inp('Km ida e volta', r, 'km', { inputmode: 'decimal' }), te]
+        : el('p', { class: 'help' }, 'Domingo não trabalhado: não entra nas horas. Conta para a quinzena se sábado e segunda foram trabalhados.')));
   });
+  while (ai < autos.length) list.append(virtualCard(autos[ai++]));
   const add = el('button', { class: 'add', type: 'button', html: icon('plus') + '<span>Adicionar dia</span>' });
   add.addEventListener('click', () => {
     if (perguntaFechamento()) return;          // completou 15 datas: pergunta antes de abrir mais um dia
     const last = d.tempos[d.tempos.length - 1];
-    d.tempos.push({ data: last && last.data ? addDays(last.data, 1) : (d.head.data || todayISO()), tecs: last ? last.tecs.slice() : d.equipe.slice(),
-      ida: '', ini: last ? last.ini : '', fim: last ? last.fim : '', volta: '', km: '' });
+    const rev = [...d.tempos].reverse();
+    let src = rev.find(x => !isSunday(x.data)) || null;       // copia do último dia que não é domingo
+    let nd = last && last.data ? addDays(last.data, 1) : (d.head.data || todayISO());
+    if (last && isSunday(nd)) nd = addDays(nd, 1);       // pula o domingo: ele entra sozinho (DOMINGO) se sábado e segunda forem trabalhados
+    if (src && isSaturday(src.data) && !isSaturday(nd)) src = rev.find(x => x.data && !isSunday(x.data) && !isSaturday(x.data)) || src;   // segunda copia o horário de dia de semana, não o do sábado
+    const sun = isSunday(nd);
+    d.tempos.push({ data: nd, tecs: sun ? [] : src ? src.tecs.slice() : d.equipe.slice(),
+      ida: '', ini: !sun && src ? src.ini : '', fim: !sun && src ? src.fim : '', volta: '', km: '', domTrab: false });
     touch(); renderHoras(); agendaFechamento();
-    const cards = $('tab-horas').querySelectorAll('.card'); const c = cards[d.tempos.length - 1]; if (c) c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const cards = $('tab-horas').querySelectorAll('.card:not(.virtual)'); const c = cards[d.tempos.length - 1]; if (c) c.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   box.append(...[grand, d.tempos.length ? null : el('div', { class: 'info' }, 'Um cartão por dia. "Adicionar dia" já avança a data e copia os técnicos e o horário do dia anterior. Só as linhas com horas saem no PDF.'),
     !d.equipe.length ? el('div', { class: 'warnbox' }, 'A equipe está vazia. Cadastre os técnicos na aba Equipe para poder marcar quem estava em cada dia.') : null,
     list, add, summary].filter(Boolean));
   refresh();
+}
+function alertaDomingo() {
+  openSheet([el('h2', { class: 'red', html: icon('alert') + ' Domingo trabalhado' }),
+    el('p', { class: 'bigwarn' }, 'POR FAVOR VERIFIQUE AS PESSOAS QUE TRABALHARAM NESTE DOMINGO!!!'),
+    el('div', { class: 'opts' }, opt('main', 'check', 'Entendi', null, back))]);
 }
 function pickTecs(r, done) {
   const d = cur.doc, sel = new Set(r.tecs);
@@ -940,7 +1030,7 @@ async function saveFlow() {
   if (!cur.doc.head.cliente.trim()) {
     openSheet([el('h2', null, 'Falta o cliente'), el('p', null, 'O nome do cliente aparece no PDF e no nome do arquivo.'),
       el('div', { class: 'opts' },
-        opt('main', 'edit', 'Preencher o cliente', null, () => { history.go(screen === 'preview' ? -2 : -1); setTimeout(() => { showTab('dados'); const i = $('tab-dados').querySelector('input'); if (i) i.focus(); }, 350); }),
+        opt('main', 'edit', 'Preencher o cliente', null, () => toEditor(() => { showTab('dados'); const i = $('tab-dados').querySelector('input'); if (i) i.focus(); })),
         opt('', 'save', 'Salvar assim mesmo', null, doSave))]);
     return;
   }
@@ -993,7 +1083,7 @@ async function saveToDevice(rec, again, dir) {
       openSheet([el('h2', null, 'Substituir o PDF?'), el('p', null, '"' + name + '" já existe na pasta "' + dir.name + '".'),
         el('div', { class: 'opts' },
           opt('main', 'save', 'Substituir', null, async () => { const r = await write(); askSend(rec, false, r); }),
-          opt('', 'edit', 'Mudar o nome do arquivo', 'Aba Dados → Nome do PDF', () => { history.go(screen === 'preview' ? -2 : -1); setTimeout(() => showTab('dados'), 350); }))]);
+          opt('', 'edit', 'Mudar o nome do arquivo', 'Aba Dados → Nome do PDF', () => toEditor(() => showTab('dados'))))]);
       return { ok: 'ask' };
     }
     return await write();
@@ -1086,7 +1176,7 @@ document.addEventListener('drop', e => { if (screen !== 'home') return; e.preven
 $('bNew').addEventListener('click', newReport);
 $('bBack').addEventListener('click', back);
 $('bBackPrev').addEventListener('click', back);
-$('bPrevEdit').addEventListener('click', back);
+$('bPrevEdit').addEventListener('click', () => { if (previewFromList) toEditor(); else back(); });
 $('bPreview').addEventListener('click', () => { flushSave(); push('preview'); showScreen('preview'); renderPreview(); });
 $('bSave').addEventListener('click', saveFlow);
 $('bPrevSave').addEventListener('click', saveFlow);
@@ -1097,21 +1187,53 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; applyStatic(); });
 $('bInstall').addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $('bInstall').hidden = true; });
+let swReg = null;
+function applyUpdate() { const w = swReg && swReg.waiting; if (w) { toast('Atualizando…', '', 8000); w.postMessage('skip'); } }
+function showUpdBanner() {
+  const b = $('updBanner'), w = swReg && swReg.waiting && navigator.serviceWorker.controller;
+  b.hidden = !w; if (w) b.innerHTML = icon('refresh') + '<span><b>Nova versão disponível.</b> Toque aqui para atualizar.</span>';
+}
+function askUpdate(reg) {
+  showUpdBanner();
+  if (!navigator.serviceWorker.controller || !$('sheet').hidden) return;
+  openSheet([el('h2', null, 'Versão nova disponível'), el('p', null, 'Atualizar agora? Os relatórios guardados continuam.'),
+    el('div', { class: 'opts' }, opt('main', 'check', 'Atualizar', null, applyUpdate), opt('', 'later', 'Mais tarde', 'O aviso continua na tela inicial', back))]);
+}
+async function checkUpdate() {
+  if (!swReg) { toast('Procurar atualização só funciona no app instalado/publicado, com internet.', 'warn', 5000); return; }
+  if (swReg.waiting) { askUpdate(swReg); return; }
+  toast('Procurando atualização…', '', 30000);
+  try { await swReg.update(); } catch (e) { toast('Sem conexão. Tente de novo com internet.', 'warn', 5000); return; }
+  for (let i = 0; i < 60 && swReg.installing; i++) await new Promise(z => setTimeout(z, 500));
+  if (swReg.waiting) { $('toast').className = ''; askUpdate(swReg); }
+  else toast('Você já está na versão mais nova (' + APP_VERSION + ').', '', 4000);
+}
+function showMenu() {
+  openSheet([el('h2', null, 'Relatório Deltafrigo'), el('p', null, 'Versão ' + APP_VERSION),
+    el('div', { class: 'opts' },
+      opt('', 'refresh', 'Procurar atualização', null, () => { back(); setTimeout(checkUpdate, 350); }),
+      opt('', 'help', 'Ajuda', null, showHelp)),
+    el('button', { class: 'cancel', onclick: back }, 'Fechar')]);
+}
+function showHelp() {
+  openSheet([el('h2', { html: icon('help') + ' Ajuda' }),
+    el('p', { class: 'helpdev' }, 'Em caso de dúvidas contate o desenvolvedor Kevin De Bortoli,'),
+    el('p', { class: 'helpjoke' }, '*Porém eu acho que ele não vai se lembrar do que fez então, boa sorte.'),
+    el('button', { class: 'cancel', onclick: back }, 'Fechar')]);
+}
+$('bMenu').addEventListener('click', showMenu);
+$('updBanner').addEventListener('click', applyUpdate);
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
-  const askUpdate = (reg, w) => {
-    if (!navigator.serviceWorker.controller || !$('sheet').hidden) return;
-    openSheet([el('h2', null, 'Versão nova disponível'), el('p', null, 'Atualizar agora? Os relatórios guardados continuam.'),
-      el('div', { class: 'opts' }, opt('main', 'check', 'Atualizar', null, () => { (reg.waiting || w).postMessage('skip'); }), opt('', 'later', 'Mais tarde', null, back))]);
-  };
   navigator.serviceWorker.register('sw.js').then(reg => {
-    if (reg.waiting) askUpdate(reg, reg.waiting);
+    swReg = reg;
+    if (reg.waiting) askUpdate(reg);
     reg.addEventListener('updatefound', () => {
       const nw = reg.installing;
-      nw.addEventListener('statechange', () => { if (nw.state === 'installed') askUpdate(reg, nw); });
+      nw.addEventListener('statechange', () => { if (nw.state === 'installed') askUpdate(reg); });
     });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') return; if (reg.waiting) askUpdate(reg, reg.waiting); else reg.update().catch(() => {}); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') return; if (reg.waiting) askUpdate(reg); else reg.update().catch(() => {}); });
   }).catch(() => {});
 }
 

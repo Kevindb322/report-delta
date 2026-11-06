@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.0.9';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -282,9 +282,10 @@ function layoutDoc(d, imgs) {
   }
   // tabela genérica: cols [{w, h:'título', a:'l|c|r'}], linhas = arrays de texto
   function table(title, cols, rows, opts = {}) {
-    const free = CW - cols.reduce((s, c) => s + (c.w || 0), 0), flex = cols.filter(c => !c.w).length;
-    cols.forEach(c => { if (!c.w) c.w = free / flex; });
     const gap = opts.gap ?? 1.6;
+    // a coluna flexível desconta também os espaços entre colunas, para a tabela terminar na margem direita
+    const free = CW - cols.reduce((s, c) => s + (c.w || 0), 0) - gap * (cols.length - 1), flex = cols.filter(c => !c.w).length;
+    cols.forEach(c => { if (!c.w) c.w = free / flex; });
     const headH = cols.some(c => c.h.includes('\n')) ? 20 : 12;
     const drawHead = () => {
       let x = ML;

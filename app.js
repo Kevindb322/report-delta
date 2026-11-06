@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.3';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -454,8 +454,17 @@ const DB = {
   open() {
     if (this.db) return Promise.resolve(this.db);
     return new Promise((res, rej) => {
-      const r = indexedDB.open('rapportDeltafrigo', 1);
-      r.onupgradeneeded = () => { r.result.createObjectStore('relatórios', { keyPath: 'id' }); r.result.createObjectStore('kv'); };
+      const r = indexedDB.open('rapportDeltafrigo', 2);
+      // v2: a 1.0.2 criou por engano a store 'relatórios'; aqui ela é copiada para 'rapports' e removida
+      r.onupgradeneeded = () => {
+        const db = r.result, tx = r.transaction, names = db.objectStoreNames;
+        if (!names.contains('rapports')) db.createObjectStore('rapports', { keyPath: 'id' });
+        if (!names.contains('kv')) db.createObjectStore('kv');
+        if (names.contains('relatórios')) {
+          const old = tx.objectStore('relatórios'), dst = tx.objectStore('rapports');
+          old.getAll().onsuccess = e => { for (const rec of e.target.result) dst.put(rec); db.deleteObjectStore('relatórios'); };
+        }
+      };
       r.onsuccess = () => { this.db = r.result; res(this.db); }; r.onerror = () => rej(r.error);
     });
   },
@@ -466,9 +475,9 @@ const DB = {
       tr.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined); tr.onerror = () => rej(tr.error);
     });
   },
-  all() { return this.tx('relatórios', 'readonly', st => st.getAll()); },
-  put(rec) { return this.tx('relatórios', 'readwrite', st => st.put(rec)); },
-  del(id) { return this.tx('relatórios', 'readwrite', st => st.delete(id)); },
+  all() { return this.tx('rapports', 'readonly', st => st.getAll()); },
+  put(rec) { return this.tx('rapports', 'readwrite', st => st.put(rec)); },
+  del(id) { return this.tx('rapports', 'readwrite', st => st.delete(id)); },
   kget(k) { return this.tx('kv', 'readonly', st => st.get(k)); },
   kset(k, v) { return this.tx('kv', 'readwrite', st => st.put(v, k)); }
 };

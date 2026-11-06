@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.4';
+const APP_VERSION = '1.0.5';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -115,7 +115,7 @@ function rowCalc(r) {
 // Horas trabalhadas totais: no mesmo dia, horários sobrepostos contam uma vez só; viagens entram inteiras.
 // Por técnico: soma o total de cada linha em que ele está marcado; 8 h = 1 diária.
 function calcAll(tempos) {
-  const rows = tempos.map(rowCalc), days = new Map(), perTec = new Map(); let grand = 0, any = false, km = 0, anyKm = false;
+  const rows = tempos.map(rowCalc), days = new Map(), perTec = new Map(), tecDays = new Map(); let grand = 0, any = false, km = 0, anyKm = false;
   rows.forEach((c, i) => {
     const r = tempos[i];
     const k = parseNum(r.km); if (c.total !== null && k !== null) { km += k; anyKm = true; }
@@ -126,7 +126,7 @@ function calcAll(tempos) {
       if (!days.has(key)) days.set(key, { data: r.data, iv: [] });
       days.get(key).iv.push([c.S, c.S + c.work]);
     }
-    for (const n of r.tecs) perTec.set(n, (perTec.get(n) || 0) + c.total);
+    for (const n of r.tecs) { perTec.set(n, (perTec.get(n) || 0) + c.total); if (!tecDays.has(n)) tecDays.set(n, new Set()); tecDays.get(n).add(r.data || ('#' + i)); }
   });
   const overlaps = [];
   for (const d of days.values()) {
@@ -137,13 +137,13 @@ function calcAll(tempos) {
     grand += uni;
     if (raw > uni) overlaps.push({ min: raw - uni, data: d.data });
   }
-  return { rows, grand, any, overlaps, perTec, km, anyKm };
+  return { rows, grand, any, overlaps, perTec, tecDays, km, anyKm };
 }
 // lista dos técnicos com horas, na ordem da equipe (quem não está mais na equipe vai no fim)
 function tecSummary(d, calc) {
   calc = calc || calcAll(d.tempos);
   const names = [...d.equipe, ...[...calc.perTec.keys()].filter(n => !d.equipe.includes(n))];
-  return names.filter(n => calc.perTec.get(n)).map(n => ({ nome: n, min: calc.perTec.get(n), diarias: calc.perTec.get(n) / 480 }));
+  return names.filter(n => calc.perTec.get(n)).map(n => ({ nome: n, dias: (calc.tecDays.get(n) || new Set()).size, min: calc.perTec.get(n), diarias: calc.perTec.get(n) / 480 }));
 }
 // datas diferentes que têm horas (dias reais de obra; o fechamento é a cada 15 datas)
 const BLOCO_DATAS = 15;
@@ -176,7 +176,7 @@ function fileNameOf(d) { return ((d.fileName || '').trim() || autoName(d)).repla
    layoutDoc() gera uma lista de páginas, cada uma com operações simples (texto, retângulo, linha, imagem)
    em pontos, com origem no canto de cima à esquerda. O PDF e a visualização usam a mesma lista,
    então a tela mostra exatamente o que sai no PDF. */
-const BLUE = '#1c2a8a', INK = '#000000', LBL = '#2b3a9c';
+const BLUE = '#1c2a8a', INK = '#000000', LBL = '#2b3a9c', SHADE = '#e2e7f6';
 const ML = 37.5, MR = PW - 37.5, CW = MR - ML, BOTTOM = PH - 34;
 const FS = 8.5;                      // tamanho do texto nas tabelas
 function fnt(f) { return FONTS[f || 'R']; }
@@ -230,8 +230,7 @@ function layoutDoc(d, imgs) {
       label(xl, y0 + i * (rh + gap) + 11, lb); box(xb, y0 + i * (rh + gap), bw, rh, v);
     });
     const y1 = y0 + 4 * (rh + gap) + 6;
-    label(ML, y1 + 11, 'Sistema / equipamento:'); box(ML + 96, y1, xb - 52 - (ML + 96), rh, h.sistema);
-    label(xb - 6, y1 + 11, 'Página:', { a: 'r' }); ops.push({ k: 'pg', x: xb, y: y1, w: 50, h: rh });
+    label(xl, y1 + 11, 'Página:'); ops.push({ k: 'pg', x: xb, y: y1, w: 50, h: rh });
     return y1 + rh + 14;
   }
   function smallHeader() {
@@ -285,7 +284,7 @@ function layoutDoc(d, imgs) {
       if (!room(m.h + gap + tail)) { newPage(); heading(title + ' (continuação)', headH + 1 + m.h); drawHead(); }
       let x = ML;
       cells.forEach((s, i) => {
-        const c = cols[i]; R(x, y, c.w, m.h, { fill: c.fill || null });
+        const c = cols[i]; R(x, y, c.w, m.h, { fill: (cells.fills && cells.fills[i]) || c.fill || null });
         const ls = m.lines[i];
         ls.forEach((l, li) => {
           if (!l) return;
@@ -307,14 +306,30 @@ function layoutDoc(d, imgs) {
     const cols = [{ w: 44, h: 'Data', a: 'c' }, { h: 'Técnicos', wrap: true }, { w: 44, h: 'Viagem\nida (h)', a: 'c' }, { w: 40, h: 'Início\ntrabalho', a: 'c' },
       { w: 40, h: 'Fim\ntrabalho', a: 'c' }, { w: 44, h: 'Viagem\nvolta (h)', a: 'c' }, { w: 46, h: 'Total\nhoras', a: 'c' }, { w: 46, h: 'Km ida\ne volta', a: 'c' }];
     const fmt = (v, clock) => { const m = parseT(v, clock); return m === null || Number.isNaN(m) ? String(v || '') : hmStr(m); };
-    table('Tempos', cols, tRows.map((r, k) => [isoToTxt(r.data, false), r.tecs.join(', '), fmt(r.ida), fmt(r.ini, true), fmt(r.fim, true), fmt(r.volta),
-      hmStr(calc.rows[tIdx[k]].total), r.km || '']), { after: 20 });
+    const cnt = {}; tRows.forEach(r => { if (r.data) cnt[r.data] = (cnt[r.data] || 0) + 1; });
+    const rep = new Set(Object.keys(cnt).filter(k => cnt[k] > 1));
+    table('Tempos', cols, tRows.map((r, k) => {
+      const row = [isoToTxt(r.data, false), r.tecs.join(', '), fmt(r.ida), fmt(r.ini, true), fmt(r.fim, true), fmt(r.volta), hmStr(calc.rows[tIdx[k]].total), r.km || ''];
+      if (rep.has(r.data)) row.fills = { 0: SHADE, 1: SHADE };
+      return row;
+    }), { after: 20 });
     // linha "Horas trabalhadas totais"
     const xTot = ML + cols.slice(0, 6).reduce((s, c) => s + c.w + 1.6, 0);
     T(ML, y + 11, 'Horas trabalhadas totais', 8.5, { f: 'I', c: LBL, u: true });
     box(xTot, y + 1, cols[6].w, 15, hmStr(calc.grand), { a: 'c', f: 'B' });
     if (calc.anyKm) box(xTot + cols[6].w + 1.6, y + 1, cols[7].w, 15, String(Math.round(calc.km * 100) / 100).replace('.', ','), { a: 'c' });
-    y += 26;
+    y += 24;
+    // explica datas repetidas e o desconto de horários sobrepostos
+    const notes = [];
+    if (rep.size) notes.push('Datas destacadas: mais de uma linha no mesmo dia (' + [...rep].sort().map(x => isoToTxt(x, false).slice(0, 5)).join(', ') + '), porque nem todos os técnicos trabalharam o mesmo horário. Cada técnico soma só as linhas em que está marcado.');
+    if (calc.overlaps.length) notes.push('Nas Horas trabalhadas totais, horários que se sobrepõem no mesmo dia contam uma vez (horas de obra): descontado ' + calc.overlaps.map(o => hmStr(o.min) + ' em ' + (o.data ? isoToTxt(o.data, false).slice(0, 5) : '?')).join(', ') + '.');
+    for (const n of notes) {
+      const ls = wrap(n, 7.2, CW, 'I');
+      if (!room(ls.length * 9 + 2)) newPage();
+      for (const l of ls) { T(ML, y + 7, l, 7.2, { f: 'I', c: '#444444' }); y += 9; }
+      y += 2;
+    }
+    y += 4;
   }
 
   // ---- Relatório (cada linha do texto vira uma linha da tabela; linhas longas quebram)
@@ -333,12 +348,12 @@ function layoutDoc(d, imgs) {
   const sum = tecSummary(d, calc);
   if (sum.length) {
     const half = Math.ceil(sum.length / 2), left = sum.slice(0, half), right = sum.slice(half);
-    const tw2 = (CW - 14) / 2, cw = [tw2 - 136, 66, 70], rh = 14;
+    const tw2 = (CW - 14) / 2, cw = [tw2 - 30 - 58 - 64 - 4.8, 30, 58, 64], rh = 14;
     const head = () => {
       [0, tw2 + 14].forEach((ox, k) => {
         if (k === 1 && !right.length) return;
         let x = ML + ox;
-        ['Nome', 'Horas totais', 'Total de diárias'].forEach((h, i) => { T(x + cw[i] / 2, y + 9, h, 7.2, { c: LBL, a: 'c' }); x += cw[i] + 1.6; });
+        ['Nome', 'Dias', 'Horas totais', 'Total de diárias'].forEach((h, i) => { T(x + cw[i] / 2, y + 9, h, 7.2, { c: LBL, a: 'c' }); x += cw[i] + 1.6; });
       });
       y += 13;
     };
@@ -349,7 +364,7 @@ function layoutDoc(d, imgs) {
       [[left[i], 0], [right[i], tw2 + 14]].forEach(([p, ox]) => {
         if (!p) return;
         let x = ML + ox;
-        [[p.nome, 'l'], [dec2(p.min / 60), 'c'], [dec2(p.diarias), 'c']].forEach(([s, a], j) => { box(x, y, cw[j], rh, s, { a, size: FS, f: j === 2 ? 'B' : 'R' }); x += cw[j] + 1.6; });
+        [[p.nome, 'l'], [String(p.dias), 'c'], [dec2(p.min / 60), 'c'], [dec2(p.diarias), 'c']].forEach(([s, a], j) => { box(x, y, cw[j], rh, s, { a, size: FS, f: j === 3 ? 'B' : 'R' }); x += cw[j] + 1.6; });
       });
       y += rh + 1.6;
     }
@@ -649,8 +664,7 @@ function renderDados() {
   box.append(
     card('user', 'Cliente', inp('Cliente', h, 'cliente', { oninput: updateBadges }), inp('Endereço / linha 2', h, 'end1'), inp('Linha 3', h, 'end2'), inp('Linha 4', h, 'end3')),
     card('note', 'Obra', el('div', { class: 'row2' }, el('label', { class: 'f' }, el('span', null, 'Data'), date), inp('Nº do relatório', h, 'numero', { inputmode: 'numeric' })),
-      inp('Nº da obra', h, 'obra'), inp('Técnico responsável', h, 'tecResp', { list: dlNames(), cap: 'words', oninput: i => pref('tecResp', i.value.trim()) }),
-      inp('Sistema / equipamento', h, 'sistema')),
+      inp('Nº da obra', h, 'obra'), inp('Técnico responsável', h, 'tecResp', { list: dlNames(), cap: 'words', oninput: i => pref('tecResp', i.value.trim()) })),
     card('file', 'Nome do arquivo', inp('Nome do PDF', d, 'fileName', { ph: autoName(d) }), el('p', { class: 'help' }, 'Em branco, usa "Relatório Cliente Nº".'))
   );
 }
@@ -690,8 +704,8 @@ function removeTec(i) {
 function tecSummaryCard() {
   const d = cur.doc, c = calcAll(d.tempos), s = tecSummary(d, c);
   if (!s.length) return null;
-  const tb = el('table', { class: 'sum' }, el('thead', null, el('tr', null, el('th', null, 'Nome'), el('th', null, 'Horas totais'), el('th', null, 'Diárias'))),
-    el('tbody', null, s.map(p => el('tr', null, el('td', null, p.nome), el('td', null, dec2(p.min / 60)), el('td', null, el('b', null, dec2(p.diarias)))))));
+  const tb = el('table', { class: 'sum' }, el('thead', null, el('tr', null, el('th', null, 'Nome'), el('th', null, 'Dias'), el('th', null, 'Horas'), el('th', null, 'Diárias'))),
+    el('tbody', null, s.map(p => el('tr', null, el('td', null, p.nome), el('td', null, p.dias), el('td', null, dec2(p.min / 60)), el('td', null, el('b', null, dec2(p.diarias)))))));
   return card('clock', 'Horas e diárias por técnico', tb, el('p', { class: 'help' }, 'Horas em decimal (7,50 = 7 h 30 min). 1 diária = 8 horas, contando trabalho + viagens. Sai no fim do PDF.'));
 }
 
@@ -710,15 +724,16 @@ function renderHoras() {
     const nd = workDates(d, c).length, falta = BLOCO_DATAS - (nd % BLOCO_DATAS);
     grand.innerHTML = '<small>Horas trabalhadas totais</small><div class="big">' + (c.any ? hmStr(c.grand) : '—') + '</div>' +
       '<div class="datas">' + plural(nd, 'data trabalhada', 'datas trabalhadas') + (nd && falta < BLOCO_DATAS ? ' · ' + (falta === 1 ? 'falta 1' : 'faltam ' + falta) + ' para fechar ' + (nd + falta) : nd ? ' · fechou ' + nd : '') + '</div>' +
-      (c.overlaps.length ? '<div class="ovl">Descontado por sobreposição no mesmo dia: ' + c.overlaps.map(o => hmStr(o.min) + ' em ' + (o.data ? isoToTxt(o.data, false) : '?')).join(', ') + ' (só aparece aqui, não no PDF)</div>'
+      (c.overlaps.length ? '<div class="ovl">Descontado por sobreposição no mesmo dia: ' + c.overlaps.map(o => hmStr(o.min) + ' em ' + (o.data ? isoToTxt(o.data, false) : '?')).join(', ') + '</div>'
         : '<small>Soma das linhas. No mesmo dia, horários que se sobrepõem contam uma vez.</small>');
     summary.innerHTML = ''; const sc = tecSummaryCard(); if (sc) summary.append(sc);
     updateBadges();
   };
+  const porData = {}; d.tempos.forEach(r => { if (r.data) porData[r.data] = (porData[r.data] || 0) + 1; });
   d.tempos.forEach((r, i) => {
     const date = el('input', { type: 'date', value: r.data || '' });
     const dl = el('span', { class: 'dl' }, r.data ? isoToTxt(r.data, false) : '');
-    date.addEventListener('change', () => { r.data = date.value; dl.textContent = date.value ? isoToTxt(date.value, false) : ''; touch(); refresh(); });
+    date.addEventListener('change', () => { r.data = date.value; touch(); renderHoras(); agendaFechamento(); });
     const time = (lbl, key) => {
       const ti = el('input', { type: 'time', value: r[key] || '', step: 60 });
       ti.addEventListener('input', () => { r[key] = ti.value; touch(); refresh(); });
@@ -729,7 +744,7 @@ function renderHoras() {
       el('span', { class: 'lbl' }, 'Técnicos presentes'),
       el('span', { class: 'names' }, r.tecs.length ? r.tecs.join(', ') : (d.equipe.length ? 'Toque para marcar' : 'Cadastre a equipe primeiro')), el('span', { html: icon('down') }));
     tecBtn.addEventListener('click', () => pickTecs(r, () => { touch(); renderHoras(); agendaFechamento(); }));
-    const head = el('h3', null, el('span', null, 'Dia ' + (i + 1)), dl, el('span', { class: 'grow' }),
+    const head = el('h3', null, el('span', null, 'Dia ' + (i + 1)), dl, porData[r.data] > 1 ? el('span', { class: 'dup' }, 'mesma data em ' + porData[r.data] + ' linhas') : null, el('span', { class: 'grow' }),
       el('button', { class: 'del', type: 'button', html: icon('trash'), 'aria-label': 'Excluir', onclick: () => { d.tempos.splice(i, 1); touch(); renderHoras(); toast('Linha excluída.'); } }));
     list.append(el('div', { class: 'card', onfocusout: agendaFechamento, onchange: agendaFechamento }, head,
       el('label', { class: 'f' }, el('span', null, 'Data'), date), tecBtn,

@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -547,6 +547,7 @@ function itemMenu(r) {
     el('p', null, fileNameOf(r.doc) + '.pdf'),
     el('div', { class: 'opts' },
       opt('main', 'edit', 'Abrir e editar', null, () => { hideSheet(); replaceTop('editor'); openEditor(r); }),
+      opt('', 'eye', 'Visualizar', 'Mostra as páginas como saem no PDF', () => { hideSheet(); replaceTop('editor'); openEditor(r); push('preview'); showScreen('preview'); renderPreview(); }),
       r.pdf && r.status !== 'draft' && opt('', 'send', 'Enviar', r.status === 'sent' ? 'Já foi enviado; dá para enviar de novo' : null, () => askSend(r, true)),
       (!r.pdf || r.status === 'draft') && opt('', 'save', 'Salvar PDF e enviar', null, () => { hideSheet(); replaceTop('editor'); openEditor(r); saveFlow(); }),
       r.pdf && opt('', 'save', IS_PC ? 'Salvar o PDF de novo' : 'Baixar o PDF de novo', null, async () => { const x = await saveToDevice(r, true); if (x.ok) { back(); toast(savedMsg(x, fileNameOf(r.doc) + '.pdf')); } }),
@@ -825,7 +826,7 @@ function renderAssinar() {
   };
   const saved = pref('sig');
   box.append(el('div', { class: 'info' }, 'Toque num quadro para assinar com o dedo. Dica: vire o celular de lado para ter mais espaço.'), tile('cliente'),
-    d.sig.cliente ? el('div', { class: 'siglinks' }, el('button', { type: 'button', onclick: () => { d.sig.cliente = null; touch(); renderAssinar(); } }, 'Remover assinatura')) : null,
+    d.sig.cliente ? el('div', { class: 'siglinks' }, el('button', { type: 'button', onclick: () => { d.sig.cliente = null; touch(); renderAssinar(); } }, 'Remover assinatura')) : '',
     tile('tecnico'),
     el('div', { class: 'siglinks' },
       saved && el('button', { type: 'button', onclick: () => { d.sig.tecnico = saved; touch(); renderAssinar(); toast('Assinatura colocada.'); } }, 'Usar minha assinatura salva'),

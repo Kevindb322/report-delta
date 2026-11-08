@@ -48,7 +48,7 @@ function parseValor(str) {
 }
 
 /* ------------------------------------------------------------ dados */
-let doc = { cliente: '', numero: '', exterior: null, moedaLocal: 'CLP', moedaUsada: 'EUR', itens: [] };
+let doc = { cliente: '', numero: '', exterior: null, moedaLocal: 'CLP', moedaUsada: 'EUR', colunas: 3, itens: [] };
 const DBN = 'custosTeste';
 function idb() { return new Promise((ok, err) => { const r = indexedDB.open(DBN, 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => err(r.error); }); }
 async function dbGet() { const db = await idb(); return new Promise(ok => { const r = db.transaction('kv').objectStore('kv').get('doc'); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); }); }
@@ -86,9 +86,11 @@ function renderTop() {
     : doc.exterior ? (doc.moedaLocal === doc.moedaUsada ? 'Moeda local e utilizada iguais: só um valor por gasto.' : 'Cada gasto terá o valor em ' + doc.moedaLocal + ' (da nota) e em ' + doc.moedaUsada + ' (o que foi cobrado).')
     : 'Cada gasto terá só o valor em R$. No fim sai o total em reais.';
   $('gastosSec').hidden = doc.exterior === null; $('actions').hidden = doc.exterior === null;
+  for (const b of $('segCols').children) b.classList.toggle('on', +b.dataset.v === (doc.colunas === 2 ? 2 : 3));
 }
 function setMoeda(key, c) { doc[key] = c; save(); renderTop(); renderGastos(); }
 $('segExt').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; doc.exterior = b.dataset.v === '1'; save(); renderTop(); renderGastos(); });
+$('segCols').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; doc.colunas = +b.dataset.v; save(); renderTop(); });
 $('cliente').addEventListener('input', e => { doc.cliente = e.target.value; save(); });
 $('numero').addEventListener('input', e => { doc.numero = e.target.value; save(); });
 
@@ -390,25 +392,31 @@ async function buildPdf() {
     notas.forEach(n => { T(n, ML, y, 7.5, { c: GRAY }); y += 10; });
   }
 
-  // folhas das notas: por data, sem assinaturas; 2 por folha (lado a lado se forem compridas, uma em cima da outra se forem largas)
-  for (let k = 0; k < comNota.length; k += 2) {
-    header('CUSTOS DE VIAGEM – NOTAS', true);
-    const par = comNota.slice(k, k + 2), top = y + 4, bottom = PH - 30, gap = 14;
-    const tall = par.every(it => it.imgH / it.imgW > 1.15);
-    const slots = par.length === 1 ? [{ x: ML, y: top, w: CW, h: bottom - top }]
-      : tall ? [{ x: ML, y: top, w: (CW - gap) / 2, h: bottom - top }, { x: ML + (CW + gap) / 2, y: top, w: (CW - gap) / 2, h: bottom - top }]
-      : [{ x: ML, y: top, w: CW, h: (bottom - top - gap) / 2 }, { x: ML, y: top + (bottom - top + gap) / 2, w: CW, h: (bottom - top - gap) / 2 }];
-    for (let j = 0; j < par.length; j++) {
-      const it = par[j], s = slots[j];
+  // folhas das notas: por data, sem assinaturas, em 2 ou 3 colunas (doc.colunas).
+  // Cada nota ocupa a largura da coluna; vai para a coluna mais baixa (encaixe tipo "mural"), e quando não cabe abre outra folha.
+  if (comNota.length) {
+    const nc = doc.colunas === 2 ? 2 : 3, gap = 10, colW = (CW - gap * (nc - 1)) / nc, HH = 36, bottom = PH - 30;
+    let colY = null, top = 0;
+    const novaFolha = () => { header('CUSTOS DE VIAGEM – NOTAS', true); top = y + 2; colY = Array(nc).fill(top); };
+    novaFolha();
+    for (const it of comNota) {
+      const maxImgH = bottom - top - HH - 4;
+      let iw = colW, ih = colW * it.imgH / it.imgW;
+      if (ih > maxImgH) { ih = maxImgH; iw = ih * it.imgW / it.imgH; }        // nota muito comprida: limita à altura da folha
+      const h = HH + ih + 2;
+      let c = colY.indexOf(Math.min(...colY));
+      if (colY[c] + h > bottom) { novaFolha(); c = 0; }
+      const x = ML + c * (colW + gap), yy = colY[c];
       const val = [fmtMoney(it.vLocal, curLocal()), two && it.vUsado !== null ? fmtMoney(it.vUsado, doc.moedaUsada) : ''].filter(Boolean).join(' / ');
-      R(s.x, s.y, s.w, 30, { fill: HEAD });
-      T('Anexo ' + it._anexo + '  ·  ' + isoTxt(it.data), s.x + 6, s.y + 12, 9, { b: 1 });
-      if (val) T(val, s.x + s.w - 6, s.y + 12, 9, { b: 1, a: 'r' });
-      T(wrap(it.desc || '-', 8.5, s.w - 12)[0], s.x + 6, s.y + 24, 8.5, { c: GRAY });
+      R(x, yy, colW, HH - 2, { fill: HEAD });
+      T('Anexo ' + it._anexo + '  ·  ' + isoTxt(it.data), x + 4, yy + 10, 7.5, { b: 1 });
+      if (val) { const sz = Math.max(5.5, Math.min(7.5, 7.5 * (colW - 8) / tw(clean(val), 7.5, FB))); T(val, x + 4, yy + 20, sz, { b: 1 }); }
+      T(wrap(it.desc || '-', 7, colW - 8)[0], x + 4, yy + 30, 7, { c: GRAY });
       const img = await pdf.embedJpg(Uint8Array.from(atob(it.img.split(',')[1]), ch => ch.charCodeAt(0)));
-      const bx = s.x, by = s.y + 34, bw = s.w, bh = s.h - 34, kk = Math.min(bw / it.imgW, bh / it.imgH), w = it.imgW * kk, h = it.imgH * kk;
-      pg.drawImage(img, { x: bx + (bw - w) / 2, y: PH - by - h, width: w, height: h });
-      R(bx + (bw - w) / 2, by, w, h, { lw: 0.4 });
+      const ix = x + (colW - iw) / 2, iy = yy + HH;
+      pg.drawImage(img, { x: ix, y: PH - iy - ih, width: iw, height: ih });
+      R(ix, iy, iw, ih, { lw: 0.4 });
+      colY[c] = yy + h + gap;
     }
   }
   const n = pdf.getPageCount();
@@ -434,7 +442,7 @@ $('bPdf').addEventListener('click', async () => {
     el('button', { type: 'button', class: 'opt', onclick: () => { const a = el('a', { href: URL.createObjectURL(f), download: f.name }); document.body.append(a); a.click(); setTimeout(() => a.remove(), 3000); hideSheet(); toast('"' + f.name + '" foi para Downloads.'); } }, 'Baixar', el('small', null, 'Salva na pasta Downloads')),
     el('button', { type: 'button', class: 'opt', onclick: hideSheet }, 'Fechar')]);
 });
-$('bLimpar').addEventListener('click', () => { if (!confirmar('Apagar todos os gastos e notas deste teste?')) return; doc = { cliente: '', numero: '', exterior: null, moedaLocal: 'CLP', moedaUsada: 'EUR', itens: [] }; save(); renderTop(); renderGastos(); });
+$('bLimpar').addEventListener('click', () => { if (!confirmar('Apagar todos os gastos e notas deste teste?')) return; doc = { cliente: '', numero: '', exterior: null, moedaLocal: 'CLP', moedaUsada: 'EUR', colunas: 3, itens: [] }; save(); renderTop(); renderGastos(); });
 
 /* ------------------------------------------------------------ início */
 (async () => {

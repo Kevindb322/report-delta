@@ -9,25 +9,34 @@
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 
-// uma linha por data: início, fim, total do dia (mesma regra das "Horas trabalhadas totais") e horas de cada técnico
+// uma linha para cada linha de horas do app (datas repetidas aparecem todas, com a mesma cor do PDF);
+// domingo automático (sábado e segunda trabalhados) entra como linha zerada.
+// As abas são de 15 datas diferentes (mesma contagem do fechamento), não de 15 linhas.
 function quinzenaRows(d) {
   const calc = calcAll(d.tempos), tecs = tecSummary(d, calc).map(t => t.nome);
-  const rows = workDates(d, calc).map(dt => {
-    const idx = d.tempos.map((r, i) => i).filter(i => d.tempos[i].data === dt && calc.rows[i].total !== null);
-    let travel = 0, ini = null, fim = null; const iv = [], per = {};
-    for (const i of idx) {
-      const c = calc.rows[i]; travel += c.travel;
-      if (c.work !== null) { iv.push([c.S, c.S + c.work]); if (ini === null || c.S < ini) ini = c.S; if (fim === null || c.S + c.work > fim) fim = c.S + c.work; }
+  const dias = workDates(d, calc).map(dt => {
+    const idx = d.tempos.map((r, i) => i).filter(i => d.tempos[i].data === dt && calc.rows[i].total !== null)
+      .sort((x, y) => (calc.rows[x].S ?? -1) - (calc.rows[y].S ?? -1) || x - y);
+    const lines = idx.map(i => {
+      const c = calc.rows[i], per = {};
       for (const n of d.tempos[i].tecs) per[n] = (per[n] || 0) + c.total;
-    }
-    iv.sort((a, b) => a[0] - b[0]);
-    let uni = 0, cs = null, ce = null;
-    for (const [a, b] of iv) { if (cs === null || a > ce) { if (cs !== null) uni += ce - cs; cs = a; ce = b; } else ce = Math.max(ce, b); }
+      return { data: dt, domTrab: isSunday(dt), ini: c.work !== null ? c.S : null, fim: c.work !== null ? (c.S + c.work) % 1440 : null, total: c.total, per };
+    });
+    if (!lines.length) lines.push({ data: dt, domTrab: false, ini: null, fim: null, total: 0, per: {} });
+    // sobreposição no mesmo dia (conta uma vez no total de horas, como no PDF)
+    const iv = idx.filter(i => calc.rows[i].work !== null).map(i => [calc.rows[i].S, calc.rows[i].S + calc.rows[i].work]).sort((x, y) => x[0] - y[0]);
+    let raw = 0, uni = 0, cs = null, ce = null;
+    for (const [x, y] of iv) { raw += y - x; if (cs === null || x > ce) { if (cs !== null) uni += ce - cs; cs = x; ce = y; } else ce = Math.max(ce, y); }
     if (cs !== null) uni += ce - cs;
-    return { data: dt, dom: isSunday(dt), domTrab: idx.length > 0 && isSunday(dt), ini, fim: fim === null ? null : fim % 1440, total: uni + travel, per };
+    return { data: dt, lines, ovl: raw - uni };
   });
+  let cor = 0;
+  for (const dia of dias) if (dia.lines.length > 1) { const f = DUP_COLORS[cor++ % DUP_COLORS.length].slice(1).toUpperCase(); dia.lines.forEach(l => { l.fill = f; }); }
   const blocos = [];
-  for (let i = 0; i < rows.length; i += BLOCO_DATAS) blocos.push(rows.slice(i, i + BLOCO_DATAS));
+  for (let i = 0; i < dias.length; i += BLOCO_DATAS) {
+    const grupo = dias.slice(i, i + BLOCO_DATAS);
+    blocos.push({ lines: grupo.flatMap(g => g.lines), ovls: grupo.filter(g => g.ovl > 0).map(g => ({ data: g.data, min: g.ovl })) });
+  }
   return { tecs, blocos };
 }
 
@@ -65,7 +74,8 @@ const excelDate = iso => { const [y, m, dd] = iso.split('-').map(Number); return
 
 /* ---------------- uma aba (quinzena) */
 const XC = { yellow: 'FFF2CC', green: '7CF04C', cyan: '80FFFF', blueGray: 'D6DCE4', pink: 'E6B8B7', nameFill: 'E2EFDA', cellFill: 'C6E0D0', blue: '5B7FD9', red: 'C00000' };
-function sheetXml(d, tecs, bloco, nBloco, totBlocos, S) {
+function sheetXml(d, tecs, blk, nBloco, totBlocos, S) {
+  const bloco = blk.lines, ovl = blk.ovls.reduce((t, o) => t + o.min, 0);
   const nP = tecs.length, lastCol = 5 + Math.max(nP, 0);   // A..F + técnicos
   const rows = {}, merges = [], heights = {};
   const put = (r, c, cell) => { (rows[r] = rows[r] || [])[c] = cell; };
@@ -93,14 +103,14 @@ function sheetXml(d, tecs, bloco, nBloco, totBlocos, S) {
 
   // linhas das datas
   bloco.forEach((q, k) => {
-    const r = R0 + k, red = q.domTrab ? { color: XC.red } : {};
+    const r = R0 + k, red = Object.assign(q.domTrab ? { color: XC.red } : {}, q.fill ? { fill: q.fill } : {});
     put(r, 0, { n: excelDate(q.data), st: S.style(Object.assign({ fmt: 'dd/mm', bd: bd(r, 0) }, red)) });
     put(r, 1, { s: DIAS_SEMANA[new Date(q.data + 'T12:00:00').getDay()] + (q.domTrab ? ' (trab.)' : ''), st: S.style(Object.assign({ bd: bd(r, 1) }, red)) });
-    put(r, 2, q.ini === null ? { st: S.style({ bd: bd(r, 2) }) } : { n: q.ini / 1440, st: S.style({ fmt: 'h:mm', bd: bd(r, 2) }) });
-    put(r, 3, q.fim === null ? { st: S.style({ bd: bd(r, 3) }) } : { n: q.fim / 1440, st: S.style({ fmt: 'h:mm', bd: bd(r, 3) }) });
-    put(r, 4, { n: q.total / 1440, st: S.style({ fmt: '[h]:mm', bd: bd(r, 4) }) });
-    put(r, 5, { f: 'ROUND(E' + r + '*24,2)', n: Math.round(q.total / 60 * 100) / 100, st: S.style({ fmt: '0.00', bd: bd(r, 5) }) });
-    tecs.forEach((n, j) => put(r, 6 + j, { n: Math.round((q.per[n] || 0) / 60 * 100) / 100, st: S.style({ fmt: '0.00', fill: XC.cellFill, bd: bd(r, 6 + j) }) }));
+    put(r, 2, q.ini === null ? { st: S.style(Object.assign({ bd: bd(r, 2) }, red)) } : { n: q.ini / 1440, st: S.style(Object.assign({ fmt: 'h:mm', bd: bd(r, 2) }, red)) });
+    put(r, 3, q.fim === null ? { st: S.style(Object.assign({ bd: bd(r, 3) }, red)) } : { n: q.fim / 1440, st: S.style(Object.assign({ fmt: 'h:mm', bd: bd(r, 3) }, red)) });
+    put(r, 4, { n: q.total / 1440, st: S.style(Object.assign({ fmt: '[h]:mm', bd: bd(r, 4) }, red)) });
+    put(r, 5, { f: 'E' + r + '*24', n: q.total / 60, st: S.style(Object.assign({ fmt: '0.00', bd: bd(r, 5) }, red)) });
+    tecs.forEach((n, j) => put(r, 6 + j, { n: (q.per[n] || 0) / 60, st: S.style({ fmt: '0.00', fill: XC.cellFill, bd: bd(r, 6 + j) }) }));
   });
 
   // totais
@@ -109,11 +119,12 @@ function sheetXml(d, tecs, bloco, nBloco, totBlocos, S) {
   heights[T1] = 30; heights[T2] = 30;
   const sumCol = c => { let s = 0; bloco.forEach((q, k) => { const cell = rows[R0 + k][c]; s += cell.n || 0; }); return Math.round(s * 100) / 100; };
   for (let c = 5; c <= lastCol; c++) {
-    const L = colName(c), tot = bloco.length ? sumCol(c) : 0;
-    put(T1, c, { f: bloco.length ? 'SUM(' + L + R0 + ':' + L + RN + ')' : '0', n: tot, st: val });
+    const L = colName(c), desc = c === 5 && ovl ? Math.round(ovl / 60 * 100) / 100 : 0, tot = Math.round(((bloco.length ? sumCol(c) : 0) - desc) * 100) / 100;
+    put(T1, c, { f: bloco.length ? 'SUM(' + L + R0 + ':' + L + RN + ')' + (desc ? '-' + desc : '') : '0', n: tot, st: val });
     put(T2, c, { f: L + T1 + '/8', n: tot / 8, st: val });
   }
 
+  if (ovl) put(T2 + 1, 0, { s: 'Total de Horas: horários sobrepostos no mesmo dia contam uma vez (descontado ' + blk.ovls.map(o => hmStr(o.min) + ' em ' + isoToTxt(o.data, false).slice(0, 5)).join(', ') + ').', st: S.style({ h: 'left', color: '404040', sz: 9 }) });
   // XML
   const cellXml = (r, c, x) => {
     const ref = colName(c) + r, st = x.st ? ' s="' + x.st + '"' : '';
@@ -130,7 +141,7 @@ function sheetXml(d, tecs, bloco, nBloco, totBlocos, S) {
     sd += '</row>';
   }
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:' + colName(lastCol) + (RN + 2) + '"/>' +
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:' + colName(lastCol) + (RN + 3) + '"/>' +
     '<sheetViews><sheetView workbookViewId="0" showGridLines="1"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>' +
     '<cols>' + widths.map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w.toFixed(1) + '" customWidth="1"/>').join('') + '</cols>' +
     '<sheetData>' + sd + '</sheetData>' +
@@ -171,7 +182,7 @@ function zipStore(files) {          // files: [{name, data: Uint8Array}]
 /* ---------------- arquivo .xlsx */
 function buildXlsx(d) {
   const { tecs, blocos } = quinzenaRows(d), S = xStyles();
-  if (!blocos.length) blocos.push([]);
+  if (!blocos.length) blocos.push({ lines: [], ovls: [] });
   const sheets = blocos.map((b, i) => sheetXml(d, tecs, b, i + 1, blocos.length, S));
   const names = blocos.map((b, i) => blocos.length > 1 ? 'Quinzena ' + (i + 1) : 'Quinzena');
   const enc = new TextEncoder(), X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';

@@ -244,18 +244,39 @@ function prepOcr(im) {
   g.putImageData(d, 0, 0); return c;
 }
 // valores com moeda escrita junto: "360.452 CLP", "325,76 EUR", "€ 12,50", "US$ 40", "R$ 89,90"
-const RX_MOEDA = [['CLP', /\bCLP\b|\bCH\$/i], ['USD', /\bUSD\b|\bU\$S\b|\bUS\s?\$/i], ['EUR', /\bEUR\b|€/i], ['BRL', /\bBRL\b|\bR\s?\$/i]];
+// valores com a moeda escrita colada no número: "360.452 CLP", "325,76 EUR", "€ 12,50", "US$ 40", "R$ 89,90"
+// (a moeda solta na linha não vale: o OCR às vezes lê a logo da Shell como "€")
+const NUMX = String.raw`\d{1,3}(?:[.,\s]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`;
+const MOEDA_TOK = [['CLP', String.raw`CLP|CH\$`], ['USD', String.raw`USD|U\$S|US\s?\$`], ['EUR', String.raw`EUR|€`], ['BRL', String.raw`BRL|R\s?\$`]];
 function acharMoedas(texto) {
   const out = {};
-  for (const l of texto.split('\n')) {
-    for (const [cur, rx] of RX_MOEDA) {
-      if (!rx.test(l)) continue;
-      const nums = numerosDaLinha(l.replace(/US\s?\$|R\s?\$|CH\$/gi, ' ')); if (!nums.length) continue;
-      const v = Math.max(...nums); out[cur] = Math.max(out[cur] || 0, v);
-    }
+  for (const l of texto.split('\n')) for (const [cur, tok] of MOEDA_TOK) {
+    const rx = new RegExp('(?:(?:' + tok + String.raw`)\s*[:=]?\s*(` + NUMX + ')|(' + NUMX + String.raw`)\s*(?:` + tok + '))', 'gi');
+    let m; while ((m = rx.exec(l))) { const v = parseValor(m[1] || m[2]); if (v !== null && v > 0) out[cur] = Math.max(out[cur] || 0, v); }
   }
   return out;
 }
+// marcas conhecidas: o nome impresso na nota (a logo em si, como desenho, o leitor não reconhece)
+const MARCAS = [
+  ['Shell', /\bshell\b|\benex\b/i], ['Copec', /\bcopec\b/i], ['Aramco', /\baramco\b/i], ['Petrobras', /petrobras/i], ['Esso', /\besso\b/i],
+  ['Texaco', /texaco/i], ['Ipiranga', /ipiranga/i], ['Posto BR / Vibra', /\bvibra\b/i], ['YPF', /\bypf\b/i], ['Axion', /\baxion\b/i],
+  ['Terpel', /terpel/i], ['Repsol', /repsol/i], ['Galp', /\bgalp\b/i],
+  ['Jumbo', /\bjumbo\b/i], ['Líder', /\bl[ií]der\b|walmart/i], ['Unimarc', /unimarc/i], ['Santa Isabel', /santa\s*isabel/i], ['Tottus', /tottus/i],
+  ['Acuenta', /acuenta/i], ['Carrefour', /carrefour/i], ['Pão de Açúcar', /p[aã]o\s*de\s*a[cç][uú]car/i], ['Assaí', /\bassa[ií]\b/i],
+  ['Atacadão', /atacad[aã]o/i], ['Makro', /\bmakro\b/i], ['Lidl', /\blidl\b/i], ['Aldi', /\baldi\b/i], ['REWE', /\brewe\b/i], ['Edeka', /\bedeka\b/i],
+  ['Cruz Verde', /cruz\s*verde/i], ['Salcobrand', /salcobrand/i], ['Farmacias Ahumada', /ahumada/i], ['Drogasil', /drogasil/i], ['Droga Raia', /droga\s*raia/i],
+  ["McDonald's", /mc\s?donald/i], ['Burger King', /burger\s*king/i], ['Subway', /\bsubway\b/i], ['Starbucks', /starbucks/i], ['KFC', /\bkfc\b/i],
+  ['Juan Valdez', /juan\s*valdez/i], ['Dunkin', /dunkin/i], ["Domino's", /domino'?s/i],
+  ['Uber', /\buber\b/i], ['Cabify', /cabify/i], ['DiDi', /\bdidi\b/i], ['LATAM', /\blatam\b/i], ['Sky Airline', /sky\s*airline/i], ['JetSMART', /jet\s*smart/i],
+  ['Gol', /\bgol\s*linhas/i], ['Azul', /azul\s*linhas/i], ['Hertz', /\bhertz\b/i], ['Avis', /\bavis\b/i], ['Localiza', /localiza/i], ['Movida', /\bmovida\b/i],
+  ['Europcar', /europcar/i], ['Budget', /\bbudget\b/i], ['Turbus', /tur\s*bus/i], ['Pullman', /pullman/i], ['Sem Parar', /sem\s*parar/i], ['ConectCar', /conectcar/i],
+  ['Costanera Norte', /costanera\s*norte/i], ['Vespucio', /vespucio/i], ['Autopista', /autopista/i],
+  ['Ibis', /\bibis\b/i], ['Holiday Inn', /holiday\s*inn/i], ['Hilton', /hilton/i], ['Marriott', /marriott/i], ['Novotel', /novotel/i], ['Mercure', /mercure/i],
+  ['Airbnb', /airbnb/i], ['Booking', /booking\.com/i],
+  ['Sodimac', /sodimac|homecenter/i], ['Easy', /\beasy\b/i], ['Falabella', /falabella/i], ['Ripley', /ripley/i], ['Leroy Merlin', /leroy\s*merlin/i], ['Construmart', /construmart/i]
+];
+// linhas que não são o nome da loja: maquininha/adquirente, bandeira do cartão, tipo de documento
+const NAO_LOJA = /\b(getnet|transbank|redcompra|redelcom|cielo|rede|stone|pagseguro|sumup|mercado\s*pago|visa|master\s*card|mastercard|maestro|amex|compra|afecta|v[aá]lido|boleta|factura|copia|comprobante|voucher|cliente|comercio|tarjeta|cart[aã]o|d[eé]bito|cr[eé]dito|rut|cnpj|cpf|nif|fecha|data|datum|date|ticket|cupom|cupon|nota\s*fiscal|recibo|receipt)\b/i;
 const RX_NUM = /\d{1,3}(?:[.,\s]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?/g;
 function numerosDaLinha(l) { return (l.replace(/(?<=\d)[oO]|[oO](?=\d)/g, '0').match(RX_NUM) || []).map(parseValor).filter(v => v !== null && v > 0); }
 // procura a linha do TOTAL (várias línguas); ignora subtotal, IVA, troco, gorjeta…
@@ -270,7 +291,10 @@ function acharTotal(texto) {
     if (nums.length) cand.push({ v: nums[nums.length - 1], forte: /(a\s*pagar|grand|total\s*(a\s*pagar|general|eur|usd|clp|r\$)|valor\s*total|monto\s*total)/i.test(l) });
   });
   // nome da loja: primeira linha com palavra de 3+ letras, sem valores, moedas, datas, RUT/CNPJ etc.
-  const loja = (lines.find(l => /[a-zA-ZÀ-ú]{3,}/.test(l) && !/\d{3,}|\d[.,]\d|\b(CLP|EUR|USD|BRL)\b|R\$|US\$|€|\b(rut|cnpj|cpf|nif|fecha|data|datum|date|boleta|factura|ticket)\b/i.test(l)) || '')
+  // nome da loja: marca conhecida (pelo nome impresso); senão, primeira linha com palavra, sem valores, moedas, datas,
+  // maquininha (GETNET, Transbank…), bandeira do cartão ou tipo de documento
+  const marca = MARCAS.find(([, rx]) => rx.test(texto));
+  const loja = marca ? marca[0] : (lines.find(l => /[a-zA-ZÀ-ú]{3,}/.test(l) && !/\d{3,}|\d[.,]\d|\b(CLP|EUR|USD|BRL)\b|R\$|US\$|€/i.test(l) && !NAO_LOJA.test(l)) || '')
     .replace(/[^\wÀ-ú .&'-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
   if (!cand.length) return { valor: null, loja };
   const fortes = cand.filter(c => c.forte), pool = fortes.length ? fortes : cand;

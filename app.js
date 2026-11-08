@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.0.9';
+const APP_VERSION = '1.1.0';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -33,6 +33,7 @@ const ICONS = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>', later: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   up: '<path d="M18 15l-6-6-6 6"/>',
+  sheet: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/>',
   dots: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.2-2.4 3.7M12 17h.01"/>'
@@ -620,6 +621,7 @@ function itemMenu(r) {
       r.pdf && r.status !== 'draft' && opt('', 'send', 'Enviar', r.status === 'sent' ? 'Já foi enviado; dá para enviar de novo' : null, () => askSend(r, true)),
       (!r.pdf || r.status === 'draft') && opt('', 'save', 'Salvar PDF e enviar', null, () => { hideSheet(); replaceTop('editor'); openEditor(r); saveFlow(); }),
       r.pdf && opt('', 'save', IS_PC ? 'Salvar o PDF de novo' : 'Baixar o PDF de novo', null, async () => { const x = await saveToDevice(r, true); if (x.ok) { back(); toast(savedMsg(x, fileNameOf(r.doc) + '.pdf')); } }),
+      hasHours(r.doc) && opt('', 'sheet', 'Planilha Excel', 'Horas e diárias no modelo da quinzena: salvar ou enviar', () => xlsxMenu(r)),
       opt('', 'copy', 'Duplicar', 'Copia cliente, equipe e dados; limpa assinaturas', () => duplicate(r)),
       opt('danger', 'trash', 'Excluir', null, () => confirmDelete(r))),
     el('button', { class: 'cancel', onclick: back }, 'Cancelar')
@@ -1105,6 +1107,7 @@ async function saveToDevice(rec, again, dir) {
 function askSend(rec, direct, saved) {
   const name = fileNameOf(rec.doc) + '.pdf';
   const ways = [el('h2', null, 'Enviar por'), el('p', null, '"' + name + '" vai como anexo.'),
+    hasHours(rec.doc) ? xlsxCheck() : null,
     el('div', { class: 'opts' },
       opt('wa', 'chat', 'WhatsApp', null, () => share(rec, 'wa')),
       opt('tg', 'plane', 'Telegram', null, () => share(rec, 'tg')),
@@ -1116,18 +1119,26 @@ function askSend(rec, direct, saved) {
   openSheet([el('h2', { html: icon('check') + ' PDF pronto' }), el('p', null, where),
     el('div', { class: 'opts' },
       opt('main', 'send', 'Enviar agora', 'WhatsApp, Telegram ou e-mail, com o PDF anexado', () => openSheet(ways)),
+      hasHours(rec.doc) && opt('', 'sheet', 'Salvar a planilha Excel', 'Horas e diárias no modelo da quinzena', () => exportXlsx(rec, true)),
       opt('', 'later', 'Mais tarde', 'Fica na lista como "não enviado"', () => later(rec)))]);
 }
 function goHome() { const n = stack.length - 1; if (n > 0) history.go(-n); }
 function later(rec) { goHome(); toast('Ok. O relatório fica na lista para enviar depois.'); }
 // plain = true: manda só o arquivo, sem título/texto (alguns navegadores recusam arquivo + texto)
-async function share(rec, via, plain) {
+// noXl = true: não mexe na planilha (já foi salva para anexar à mão, ou "só o PDF")
+async function share(rec, via, plain, noXl) {
   const file = new File([rec.pdf], fileNameOf(rec.doc) + '.pdf', { type: 'application/pdf' });
   if (!(navigator.canShare && navigator.canShare({ files: [file] }))) { shareFail(rec, via, null, true); return; }
+  const files = [file];
+  if (!noXl && wantXlsx(rec)) {
+    const xf = xlsxFile(rec.doc);
+    if (navigator.canShare({ files: [file, xf] })) files.push(xf);
+    else { await xlsxManual(rec, via); return; }      // Chrome: Excel não vai anexado; salva e explica
+  }
   if (via !== 'other') toast('Escolha ' + VIA[via] + ' na lista que abrir.', '', 2500);
   const h = rec.doc.head;
-  const data = plain ? { files: [file] }
-    : { files: [file], title: fileNameOf(rec.doc), text: 'Relatório Deltafrigo – ' + [h.cliente.trim(), isoToTxt(h.data, true), h.numero && 'Nº ' + h.numero].filter(Boolean).join(' – ') };
+  const data = plain ? { files }
+    : { files, title: fileNameOf(rec.doc), text: 'Relatório Deltafrigo – ' + [h.cliente.trim(), isoToTxt(h.data, true), h.numero && 'Nº ' + h.numero].filter(Boolean).join(' – ') };
   try { await navigator.share(data); }
   catch (e) { if (e.name === 'AbortError') return; console.warn('share', e); shareFail(rec, via, e, plain); return; }
   markSent(rec, via);
@@ -1146,9 +1157,82 @@ function shareFail(rec, via, e, final) {
     samsung ? el('div', { class: 'warnbox' }, 'O Samsung Internet costuma bloquear o envio de anexos. Abra o app no Chrome.') : null,
     el('p', null, 'O PDF "' + fileNameOf(rec.doc) + '.pdf" já está salvo. Dá para anexar à mão no WhatsApp, Telegram ou e-mail.'),
     el('div', { class: 'opts' },
-      final ? null : opt('main', 'send', 'Tentar de novo (só o PDF)', 'Manda só o arquivo, sem o texto da mensagem', () => share(rec, via, true)),
+      final ? null : opt('main', 'send', 'Tentar de novo (só o PDF)', 'Manda só o arquivo, sem o texto da mensagem', () => share(rec, via, true, true)),
       opt('', 'check', 'Já enviei à mão', 'Marca o relatório como enviado', () => markSent(rec, 'manual')),
       opt('', 'later', 'Mais tarde', 'Fica na lista como "não enviado"', () => later(rec)))]);
+}
+
+/* ------------------------------------------------------------------ planilha Excel (xlsx.js)
+   O Chrome (Android e PC) não deixa anexar .xlsx pelo compartilhamento do navegador (só PDF, imagem, texto…).
+   Nesse caso a planilha é salva (Downloads ou a pasta do PC) e o app explica como anexar à mão.
+   No Safari (iPhone) ela vai anexada junto com o PDF. */
+const XLSX_SHARE = (() => { try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'a.xlsx', { type: XLSX_MIME })] })); } catch (e) { return false; } })();
+const hasHours = d => workDates(d).length > 0;
+const wantXlsx = rec => pref('anexaXlsx') === '1' && hasHours(rec.doc);
+function xlsxCheck() {
+  const cb = el('input', { type: 'checkbox' }); cb.checked = pref('anexaXlsx') === '1';
+  cb.addEventListener('change', () => pref('anexaXlsx', cb.checked ? '1' : '0'));
+  return el('div', { class: 'xlcheck' }, el('label', { class: 'check' }, cb, el('span', null, 'Enviar também a planilha Excel', el('small', null, 'Horas e diárias no modelo da quinzena' +
+    (XLSX_SHARE ? '' : '. Este navegador não anexa Excel sozinho: ela é salva ' + (IS_PC ? 'na pasta' : 'em Downloads') + ' para você anexar junto')))));
+}
+async function saveXlsx(rec, dir) {
+  const file = xlsxFile(rec.doc), name = file.name;
+  if (IS_PC) {
+    dir = dir || await getDir(true); if (!dir) return { ok: false, name };
+    const fh = await dir.getFileHandle(name, { create: true }); const w = await fh.createWritable(); await w.write(file); await w.close();
+    return { ok: true, where: dir.name + '\\' + name, name };
+  }
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'Planilha Excel', accept: { [XLSX_MIME]: ['.xlsx'] } }] });
+      const w = await h.createWritable(); await w.write(file); await w.close();
+      return { ok: true, where: h.name, name };
+    } catch (e) { if (e.name === 'AbortError') return { ok: false, name }; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name;
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+  return { ok: true, where: 'downloads', name };
+}
+async function exportXlsx(rec, stay) {
+  try {
+    const r = await saveXlsx(rec); if (!r.ok) return;
+    if (!stay) back();
+    toast('Planilha: ' + savedMsg(r, r.name), '', 5000);
+  } catch (e) { console.error(e); toast('Erro ao gerar a planilha: ' + e.message, 'warn', 6000); }
+}
+function xlsxMenu(rec) {
+  const name = fileNameOf(rec.doc) + '.xlsx', n = workDates(rec.doc).length;
+  openSheet([el('h2', { html: icon('sheet') + ' Planilha Excel' }),
+    el('p', null, '"' + name + '": ' + plural(n, 'data', 'datas') + ', horas e diárias de cada técnico' + (n > BLOCO_DATAS ? ' (uma aba por quinzena)' : '') + '.'),
+    el('div', { class: 'opts' },
+      opt('main', 'save', IS_PC ? 'Salvar na pasta' : 'Baixar no celular', IS_PC ? 'Mesma pasta dos PDFs' : 'Vai para a pasta Downloads', () => exportXlsx(rec)),
+      opt('', 'send', 'Enviar só a planilha', XLSX_SHARE ? 'WhatsApp, Telegram, e-mail…' : 'Salva e mostra como anexar', () => shareXlsx(rec))),
+    el('button', { class: 'cancel', onclick: back }, 'Cancelar')]);
+}
+async function shareXlsx(rec) {
+  try {
+    const xf = xlsxFile(rec.doc);
+    if (XLSX_SHARE && navigator.canShare({ files: [xf] })) {
+      try { await navigator.share({ files: [xf], title: xf.name }); back(); toast('Planilha enviada.'); }
+      catch (e) { if (e.name !== 'AbortError') { await xlsxManual(rec, null); } }
+      return;
+    }
+    await xlsxManual(rec, null);
+  } catch (e) { console.error(e); toast('Erro ao gerar a planilha: ' + e.message, 'warn', 6000); }
+}
+// salva a planilha e explica como anexar; via = null: só a planilha; senão continua para o envio do PDF
+async function xlsxManual(rec, via) {
+  const r = await saveXlsx(rec); if (!r.ok) return;
+  const onde = r.where === 'downloads' ? 'na pasta Downloads' : 'em ' + r.where;
+  const app = via && via !== 'other' ? VIA[via] : 'WhatsApp, Telegram ou e-mail';
+  openSheet([el('h2', { html: icon('sheet') + ' Planilha salva' }),
+    el('p', null, '"' + r.name + '" foi salva ' + onde + '.'),
+    el('div', { class: 'warnbox' }, 'Este navegador não deixa anexar planilha Excel automaticamente. ' +
+      (via ? 'Vou abrir o envio do PDF. Depois, na mesma conversa do ' + app + ', anexe a planilha pelo clipe → Documento (ela aparece nos arquivos recentes).'
+           : 'No ' + app + ', anexe ela pelo clipe → Documento (aparece nos arquivos recentes).')),
+    el('div', { class: 'opts', style: 'margin-top:14px' },
+      via ? opt('main', 'send', 'Continuar: enviar o PDF', null, () => share(rec, via, false, true)) : opt('main', 'check', 'Ok', null, back),
+      via ? opt('', 'check', 'Já enviei tudo à mão', 'Marca o relatório como enviado', () => markSent(rec, 'manual')) : null)]);
 }
 
 /* ------------------------------------------------------------------ folha de opções */

@@ -1,8 +1,7 @@
 // Service worker: guarda o app no aparelho para funcionar sem internet.
 // Ao publicar uma versão nova, mude o número abaixo (e APP_VERSION no app.js).
-// o app continua mostrando 1.0.9; o 'b' só força os aparelhos a baixarem a mudança
-const CACHE = 'rapport-delta-v1.0.9b';
-const FILES = ['./', 'index.html', 'app.css', 'app.js', 'pdf-lib.min.js', 'manifest.webmanifest', 'logo.png',
+const CACHE = 'rapport-delta-v1.1.0';
+const FILES = ['./', 'index.html', 'app.css', 'app.js', 'xlsx.js', 'pdf-lib.min.js', 'manifest.webmanifest', 'logo.png',
   'icons2/dl-192.png', 'icons2/dl-512.png', 'icons2/dl-180.png', 'icons2/dl-maskable-512.png'];
 // cache: 'reload' = baixa da internet, sem usar o cache do navegador (senão a versão nova pode guardar arquivos velhos)
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' }))))); });

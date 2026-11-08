@@ -238,3 +238,8 @@ table.sum th:not(:first-child), table.sum td:not(:first-child) { text-align:righ
 .sheet .bigwarn { font-size:20px; font-weight:800; color:#b3261e; line-height:1.3; background:#fdecea; border-radius:12px; padding:14px; text-align:center; }
 .sheet .helpdev { font-size:17px; color:var(--ink); }
 .sheet .helpjoke { font-style:italic; color:var(--muted); }
+
+/* 1.1.0: opção de enviar a planilha Excel junto */
+.xlcheck { margin:-4px 0 12px; }
+.xlcheck .check { border:1.5px solid #dfe4ee; border-radius:12px; padding:10px 12px; font-size:15.5px; font-weight:600; }
+.xlcheck .check small { display:block; font-weight:500; color:var(--muted); font-size:12.5px; margin-top:2px; line-height:1.3; }

@@ -94,9 +94,10 @@ $('numero').addEventListener('input', e => { doc.numero = e.target.value; save()
 
 const dupla = () => doc.exterior && doc.moedaLocal !== doc.moedaUsada;
 function moneyInput(it, key, cur) {
-  const i = el('input', { class: 'money' + (key === 'vLocal' && it.auto ? ' auto' : ''), inputmode: 'decimal', autocomplete: 'off', placeholder: cur === 'CLP' ? '0' : '0,00',
+  const isAuto = key === 'vLocal' ? it.auto : it.autoUsado;
+  const i = el('input', { class: 'money' + (isAuto ? ' auto' : ''), inputmode: 'decimal', autocomplete: 'off', placeholder: 'digite',
     value: it[key] === null || it[key] === undefined ? '' : fmtNum(it[key], cur) });
-  i.addEventListener('input', () => { it[key] = parseValor(i.value); if (key === 'vLocal' && it.ocr === 'fail') { it.ocr = null; const ch = i.closest('.gasto').querySelector('.chip.fail'); if (ch) ch.remove(); } if (key === 'vLocal' && it.auto) { it.auto = false; i.classList.remove('auto'); const ch = i.closest('.gasto').querySelector('.chip.ok'); if (ch) ch.remove(); } save(); renderTotais(); });
+  i.addEventListener('input', () => { it[key] = parseValor(i.value); if (key === 'vLocal' && it.ocr === 'fail') { it.ocr = null; const ch = i.closest('.gasto').querySelector('.chip.fail'); if (ch) ch.remove(); } if (key === 'vUsado' && it.autoUsado) { it.autoUsado = false; i.classList.remove('auto'); } if (key === 'vLocal' && it.auto) { it.auto = false; i.classList.remove('auto'); const ch = i.closest('.gasto').querySelector('.chip.ok'); if (ch) ch.remove(); } save(); renderTotais(); });
   i.addEventListener('blur', () => { i.value = it[key] === null ? '' : fmtNum(it[key], cur); });
   return i;
 }
@@ -115,7 +116,7 @@ function renderGastos() {
     const data = el('input', { type: 'date', value: it.data });
     data.addEventListener('change', () => { it.data = data.value; save(); renderGastos(); });
     const chip = it.ocr === 'busy' ? el('span', { class: 'chip busy' }, el('span', { class: 'spin' }), 'Lendo o valor da nota…')
-      : it.ocr === 'ok' && it.auto ? el('span', { class: 'chip ok' }, '⚠ Valor lido da nota: confira')
+      : it.ocr === 'ok' && (it.auto || it.autoUsado) ? el('span', { class: 'chip ok' }, '⚠ ' + (it.auto && it.autoUsado && dupla() ? 'Valores lidos' : 'Valor lido') + ' da imagem: confira')
       : it.ocr === 'fail' ? el('span', { class: 'chip fail' }, 'Não consegui ler o total: digite o valor') : null;
     const body = el('div', null,
       el('div', { class: 'top' }, el('label', { class: 'f', style: 'max-width:170px' }, el('span', null, 'Data'), data),
@@ -153,7 +154,7 @@ function renderTotais() {
 }
 
 /* ------------------------------------------------------------ gastos */
-function novoGasto() { return { id: newId(), criado: Date.now(), data: todayISO(), desc: '', vLocal: null, vUsado: null, img: null, imgW: 0, imgH: 0, ocr: null, auto: false }; }
+function novoGasto() { return { id: newId(), criado: Date.now(), data: todayISO(), desc: '', vLocal: null, vUsado: null, img: null, imgW: 0, imgH: 0, ocr: null, auto: false, autoUsado: false }; }
 $('bManual').addEventListener('click', () => { const it = novoGasto(); doc.itens.push(it); save(); renderGastos(); toast('Gasto adicionado. Preencha a descrição e o valor.'); });
 let fotoAlvo = null;
 function pickFoto(it) { fotoAlvo = it || null; $('fFoto').click(); }
@@ -183,7 +184,7 @@ async function girar(it) {
   it.img = c.toDataURL('image/jpeg', 0.82); it.imgW = c.width; it.imgH = c.height; save(); renderGastos();
   if (it.vLocal === null) { it.ocr = 'busy'; renderGastos(); lerNota(it); }
 }
-function tirarNota(it) { if (!confirmar('Tirar a nota deste gasto? O gasto continua, sem a imagem.')) return; it.img = null; it.ocr = null; it.auto = false; save(); renderGastos(); }
+function tirarNota(it) { if (!confirmar('Tirar a nota deste gasto? O gasto continua, sem a imagem.')) return; it.img = null; it.ocr = null; it.auto = false; it.autoUsado = false; save(); renderGastos(); }
 function delGasto(it) { if (!confirmar('Excluir este gasto' + (it.desc ? ' (' + it.desc + ')' : '') + '?')) return; doc.itens = doc.itens.filter(x => x !== it); save(); renderGastos(); }
 function confirmar(m) { return window.confirm(m); }
 function verNota(it) {
@@ -212,10 +213,17 @@ async function rodaFila() {
       const im = await loadImage(await (await fetch(it.img)).blob());
       const c = prepOcr(im);
       const { data } = await w.recognize(c);
-      const r = acharTotal(data.text);
-      console.log('OCR', data.text, r);
+      const r = acharTotal(data.text), m = acharMoedas(data.text), cl = curLocal();
+      console.log('OCR', data.text, r, m);
       it.ocrTexto = data.text;
-      if (r.valor !== null) { it.vLocal = r.valor; it.auto = true; it.ocr = 'ok'; } else it.ocr = 'fail';
+      // valor da moeda local: linha do TOTAL; senão, valor com a moeda escrita (ex.: print do app do banco)
+      // (se o TOTAL está escrito em outra moeda, ex.: "Gesamt EUR" com moeda local CLP, não vai para a moeda local)
+      const totalOutra = r.valor !== null && m[cl] === undefined && Object.entries(m).some(([k, v]) => k !== cl && v === r.valor);
+      const vl = r.valor !== null && !totalOutra ? r.valor : m[cl] !== undefined ? m[cl] : null;
+      if (vl !== null && (it.vLocal === null || it.auto)) { it.vLocal = vl; it.auto = true; }
+      // print do banco com as duas moedas: completa também a moeda utilizada
+      if (dupla() && m[doc.moedaUsada] !== undefined && (it.vUsado === null || it.autoUsado)) { it.vUsado = m[doc.moedaUsada]; it.autoUsado = true; }
+      it.ocr = it.auto || it.autoUsado ? 'ok' : 'fail';
       const dt = acharData(data.text); if (dt && it.data === todayISO()) it.data = dt;
       if (!it.desc && r.loja) it.desc = r.loja;
     } catch (e) { console.error(e); it.ocr = 'fail'; toast('Leitura automática indisponível: ' + (e.message || e), 'warn', 6000); }
@@ -223,10 +231,30 @@ async function rodaFila() {
   }
   ocrRodando = false;
 }
-function prepOcr(im) {                 // cinza + contraste, ~1800 px no lado maior
-  const c = toCanvas(im, 1800), g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height), p = d.data;
-  for (let i = 0; i < p.length; i += 4) { let y = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; y = Math.max(0, Math.min(255, (y - 128) * 1.35 + 140)); p[i] = p[i + 1] = p[i + 2] = y; }
+// cinza + contraste; imagem pequena (print de tela) é ampliada; fundo escuro (app do banco em modo escuro) é invertido
+function prepOcr(im) {
+  const w0 = im.naturalWidth || im.width, h0 = im.naturalHeight || im.height, up = Math.min(3, Math.max(1, 1600 / Math.max(w0, h0)));
+  const c = document.createElement('canvas'); c.width = Math.round(w0 * up); c.height = Math.round(h0 * up);
+  if (Math.max(c.width, c.height) > 2400) { const k = 2400 / Math.max(c.width, c.height); c.width = Math.round(c.width * k); c.height = Math.round(c.height * k); }
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height), p = d.data; let soma = 0;
+  for (let i = 0; i < p.length; i += 4) { const y = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = y; soma += y; }
+  const escuro = soma / (p.length / 4) < 110;
+  for (let i = 0; i < p.length; i += 4) { let y = escuro ? 255 - p[i] : p[i]; y = Math.max(0, Math.min(255, (y - 128) * 1.35 + 140)); p[i] = p[i + 1] = p[i + 2] = y; }
   g.putImageData(d, 0, 0); return c;
+}
+// valores com moeda escrita junto: "360.452 CLP", "325,76 EUR", "€ 12,50", "US$ 40", "R$ 89,90"
+const RX_MOEDA = [['CLP', /\bCLP\b|\bCH\$/i], ['USD', /\bUSD\b|\bU\$S\b|\bUS\s?\$/i], ['EUR', /\bEUR\b|€/i], ['BRL', /\bBRL\b|\bR\s?\$/i]];
+function acharMoedas(texto) {
+  const out = {};
+  for (const l of texto.split('\n')) {
+    for (const [cur, rx] of RX_MOEDA) {
+      if (!rx.test(l)) continue;
+      const nums = numerosDaLinha(l.replace(/US\s?\$|R\s?\$|CH\$/gi, ' ')); if (!nums.length) continue;
+      const v = Math.max(...nums); out[cur] = Math.max(out[cur] || 0, v);
+    }
+  }
+  return out;
 }
 const RX_NUM = /\d{1,3}(?:[.,\s]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?/g;
 function numerosDaLinha(l) { return (l.replace(/(?<=\d)[oO]|[oO](?=\d)/g, '0').match(RX_NUM) || []).map(parseValor).filter(v => v !== null && v > 0); }
@@ -241,7 +269,9 @@ function acharTotal(texto) {
     if (!nums.length && lines[i + 1]) nums = numerosDaLinha(lines[i + 1]);
     if (nums.length) cand.push({ v: nums[nums.length - 1], forte: /(a\s*pagar|grand|total\s*(a\s*pagar|general|eur|usd|clp|r\$)|valor\s*total|monto\s*total)/i.test(l) });
   });
-  const loja = (lines.find(l => /[a-zA-ZÀ-ú]{3,}/.test(l) && !/\d{4,}/.test(l)) || '').replace(/[^\wÀ-ú .&'-]/g, '').trim().slice(0, 40);
+  // nome da loja: primeira linha com palavra de 3+ letras, sem valores, moedas, datas, RUT/CNPJ etc.
+  const loja = (lines.find(l => /[a-zA-ZÀ-ú]{3,}/.test(l) && !/\d{3,}|\d[.,]\d|\b(CLP|EUR|USD|BRL)\b|R\$|US\$|€|\b(rut|cnpj|cpf|nif|fecha|data|datum|date|boleta|factura|ticket)\b/i.test(l)) || '')
+    .replace(/[^\wÀ-ú .&'-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
   if (!cand.length) return { valor: null, loja };
   const fortes = cand.filter(c => c.forte), pool = fortes.length ? fortes : cand;
   return { valor: Math.max(...pool.map(c => c.v)), loja };

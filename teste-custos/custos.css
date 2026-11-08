@@ -48,7 +48,7 @@ button { font:inherit; color:inherit; border:0; background:none; cursor:pointer;
 .gasto { background:var(--card); border-radius:var(--r); padding:12px; margin-bottom:10px; box-shadow:0 1px 3px rgba(20,40,80,.08);
   display:grid; grid-template-columns:86px 1fr; gap:12px; }
 .gasto.semnota { grid-template-columns:1fr; }
-.thumb { width:86px; height:112px; border-radius:10px; background:#eef2f8 center/cover no-repeat; border:1.5px solid var(--line);
+.thumb { width:86px; height:112px; border-radius:10px; background:#eef2f8 center 40%/contain no-repeat; border:1.5px solid var(--line);
   position:relative; overflow:hidden; display:grid; place-items:center; color:var(--muted); font-size:12px; text-align:center; }
 .thumb .tools { position:absolute; left:0; right:0; bottom:0; display:flex; }
 .thumb .tools button { flex:1; background:rgba(20,30,60,.72); color:#fff; font-size:12px; padding:5px 0; }
@@ -101,3 +101,4 @@ button { font:inherit; color:inherit; border:0; background:none; cursor:pointer;
 .sheet .opt small { display:block; font-weight:500; font-size:12.5px; opacity:.8; }
 .sheet img.full { width:100%; border-radius:10px; display:block; margin-bottom:10px; }
 @media (max-width:420px) { .addrow { grid-template-columns:1fr; } .gasto .vals { grid-template-columns:1fr 1fr; } }
+.f input.money::placeholder { font-weight:400; color:#a3acb9; font-size:14px; }

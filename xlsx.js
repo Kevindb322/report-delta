@@ -1,6 +1,6 @@
 'use strict';
 /* Planilha Excel no modelo da quinzena do Kevin (horas e diárias).
-   Colunas: Data | Dia | Horário (Início, Fim, Intervalo, Horas Decimais) | Pessoas (um técnico por coluna).
+   Colunas: Data | Dia | Horário (Viagem ida, Início, Fim, Viagem volta, Intervalo, Horas Decimais) | Pessoas (um técnico por coluna).
    Embaixo: "Total de Horas na quinzena" e "Total de Diárias na quinzena" (8 h = 1 diária), com fórmulas.
    Uma aba para cada 15 datas (a mesma contagem do fechamento do app: datas com horas + domingos automáticos).
    O .xlsx é montado aqui mesmo (XML + zip sem compressão), sem biblioteca externa, para funcionar offline.
@@ -9,7 +9,7 @@
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 
-// uma linha para cada linha de horas do app (datas repetidas aparecem todas, com a mesma cor do PDF);
+// uma linha para cada linha de horas do app, com viagem de ida e de volta (datas repetidas aparecem todas, com a mesma cor do PDF);
 // domingo automático (sábado e segunda trabalhados) entra como linha zerada.
 // As abas são de 15 datas diferentes (mesma contagem do fechamento), não de 15 linhas.
 function quinzenaRows(d) {
@@ -20,9 +20,10 @@ function quinzenaRows(d) {
     const lines = idx.map(i => {
       const c = calc.rows[i], per = {};
       for (const n of d.tempos[i].tecs) per[n] = (per[n] || 0) + c.total;
-      return { data: dt, domTrab: isSunday(dt), ini: c.work !== null ? c.S : null, fim: c.work !== null ? (c.S + c.work) % 1440 : null, total: c.total, per };
+      const r = d.tempos[i], ida = num(parseT(r.ida)), volta = num(parseT(r.volta));
+      return { data: dt, domTrab: isSunday(dt), ida, volta, ini: c.work !== null ? c.S : null, fim: c.work !== null ? (c.S + c.work) % 1440 : null, total: c.total, per };
     });
-    if (!lines.length) lines.push({ data: dt, domTrab: false, ini: null, fim: null, total: 0, per: {} });
+    if (!lines.length) lines.push({ data: dt, domTrab: false, ida: null, volta: null, ini: null, fim: null, total: 0, per: {} });
     // sobreposição no mesmo dia (conta uma vez no total de horas, como no PDF)
     const iv = idx.filter(i => calc.rows[i].work !== null).map(i => [calc.rows[i].S, calc.rows[i].S + calc.rows[i].work]).sort((x, y) => x[0] - y[0]);
     let raw = 0, uni = 0, cs = null, ce = null;
@@ -73,14 +74,17 @@ const colName = c => { let s = ''; c++; while (c > 0) { const m = (c - 1) % 26; 
 const excelDate = iso => { const [y, m, dd] = iso.split('-').map(Number); return Math.round((Date.UTC(y, m - 1, dd) - Date.UTC(1899, 11, 30)) / 86400000); };
 
 /* ---------------- uma aba (quinzena) */
-const XC = { yellow: 'FFF2CC', green: '7CF04C', cyan: '80FFFF', blueGray: 'D6DCE4', pink: 'E6B8B7', nameFill: 'E2EFDA', cellFill: 'C6E0D0', blue: '5B7FD9', red: 'C00000' };
+const XC = { yellow: 'FFF2CC', green: '7CF04C', cyan: '80FFFF', blueGray: 'D6DCE4', pink: 'E6B8B7', nameFill: 'E2EFDA', cellFill: 'C6E0D0', blue: '5B7FD9', red: 'C00000', travel: 'FCE4D6' };
 function sheetXml(d, tecs, blk, nBloco, totBlocos, S) {
   const bloco = blk.lines, ovl = blk.ovls.reduce((t, o) => t + o.min, 0);
-  const nP = tecs.length, lastCol = 5 + Math.max(nP, 0);   // A..F + técnicos
+  // colunas: A Data | B Dia | C Viagem ida | D Início | E Fim | F Viagem volta | G Intervalo | H Horas Decimais | I… técnicos
+  const C_IDA = 2, C_INI = 3, C_FIM = 4, C_VOL = 5, C_INT = 6, C_HD = 7, C_P = 8;
+  const nP = tecs.length, lastCol = C_HD + nP;
   const rows = {}, merges = [], heights = {};
   const put = (r, c, cell) => { (rows[r] = rows[r] || [])[c] = cell; };
+  const L = c => colName(c);
   // bordas: grossas no contorno, entre Dia|Horário e Horário|Pessoas e embaixo dos títulos
-  const vThick = c => c === 0 || c === 2 || c === 6 || c === lastCol + 1;
+  const vThick = c => c === 0 || c === C_IDA || c === C_P || c === lastCol + 1;
   const TOP = 3, H2 = TOP + 1, R0 = TOP + 2, RN = R0 + bloco.length - 1;
   const bd = (r, c) => [vThick(c) ? 'medium' : 'thin', vThick(c + 1) ? 'medium' : 'thin', r === TOP ? 'medium' : 'thin', (r === H2 || r === RN) ? 'medium' : 'thin'];
 
@@ -93,35 +97,39 @@ function sheetXml(d, tecs, blk, nBloco, totBlocos, S) {
   const hd = (r, c, s, fill, o = {}) => put(r, c, { s, st: S.style(Object.assign({ b: 1, fill, bd: bd(r, c) }, o)) });
   hd(TOP, 0, 'Data', XC.yellow); hd(H2, 0, '', XC.yellow); merges.push('A' + TOP + ':A' + H2);
   hd(TOP, 1, 'Dia', XC.yellow); hd(H2, 1, '', XC.yellow); merges.push('B' + TOP + ':B' + H2);
-  for (let c = 2; c <= 5; c++) hd(TOP, c, c === 2 ? 'Horário' : '', XC.green); merges.push('C' + TOP + ':F' + TOP);
-  hd(H2, 2, 'Início', XC.blueGray); hd(H2, 3, 'Fim', XC.pink); hd(H2, 4, 'Intervalo', XC.blueGray); hd(H2, 5, 'Horas Decimais', XC.pink);
+  for (let c = C_IDA; c <= C_HD; c++) hd(TOP, c, c === C_IDA ? 'Horário' : '', XC.green); merges.push(L(C_IDA) + TOP + ':' + L(C_HD) + TOP);
+  hd(H2, C_IDA, 'Viagem ida', XC.travel); hd(H2, C_INI, 'Início', XC.blueGray); hd(H2, C_FIM, 'Fim', XC.pink); hd(H2, C_VOL, 'Viagem volta', XC.travel);
+  hd(H2, C_INT, 'Intervalo', XC.blueGray); hd(H2, C_HD, 'Horas Decimais', XC.pink);
   if (nP) {
-    for (let j = 0; j < nP; j++) { hd(TOP, 6 + j, j === 0 ? 'Pessoas' : '', XC.cyan); hd(H2, 6 + j, tecs[j], XC.nameFill, { b: 0 }); }
-    if (nP > 1) merges.push(colName(6) + TOP + ':' + colName(5 + nP) + TOP);
+    for (let j = 0; j < nP; j++) { hd(TOP, C_P + j, j === 0 ? 'Pessoas' : '', XC.cyan); hd(H2, C_P + j, tecs[j], XC.nameFill, { b: 0 }); }
+    if (nP > 1) merges.push(L(C_P) + TOP + ':' + L(C_HD + nP) + TOP);
   }
   heights[TOP] = 18; heights[H2] = 18;
 
-  // linhas das datas
+  // linhas: Intervalo = (Fim − Início, passando da meia-noite) + viagem de ida + viagem de volta, com fórmula
   bloco.forEach((q, k) => {
     const r = R0 + k, red = Object.assign(q.domTrab ? { color: XC.red } : {}, q.fill ? { fill: q.fill } : {});
-    put(r, 0, { n: excelDate(q.data), st: S.style(Object.assign({ fmt: 'dd/mm', bd: bd(r, 0) }, red)) });
-    put(r, 1, { s: DIAS_SEMANA[new Date(q.data + 'T12:00:00').getDay()] + (q.domTrab ? ' (trab.)' : ''), st: S.style(Object.assign({ bd: bd(r, 1) }, red)) });
-    put(r, 2, q.ini === null ? { st: S.style(Object.assign({ bd: bd(r, 2) }, red)) } : { n: q.ini / 1440, st: S.style(Object.assign({ fmt: 'h:mm', bd: bd(r, 2) }, red)) });
-    put(r, 3, q.fim === null ? { st: S.style(Object.assign({ bd: bd(r, 3) }, red)) } : { n: q.fim / 1440, st: S.style(Object.assign({ fmt: 'h:mm', bd: bd(r, 3) }, red)) });
-    put(r, 4, { n: q.total / 1440, st: S.style(Object.assign({ fmt: '[h]:mm', bd: bd(r, 4) }, red)) });
-    put(r, 5, { f: 'E' + r + '*24', n: q.total / 60, st: S.style(Object.assign({ fmt: '0.00', bd: bd(r, 5) }, red)) });
-    tecs.forEach((n, j) => put(r, 6 + j, { n: (q.per[n] || 0) / 60, st: S.style({ fmt: '0.00', fill: XC.cellFill, bd: bd(r, 6 + j) }) }));
+    const sty = (c, o) => S.style(Object.assign({ bd: bd(r, c) }, o || {}, red));
+    const tm = (c, v, fmt) => put(r, c, v === null || v === undefined || (fmt === '[h]:mm' && !v) ? { st: sty(c) } : { n: v / 1440, st: sty(c, { fmt }) });
+    put(r, 0, { n: excelDate(q.data), st: sty(0, { fmt: 'dd/mm' }) });
+    put(r, 1, { s: DIAS_SEMANA[new Date(q.data + 'T12:00:00').getDay()] + (q.domTrab ? ' (trab.)' : ''), st: sty(1) });
+    tm(C_IDA, q.ida, '[h]:mm'); tm(C_INI, q.ini, 'h:mm'); tm(C_FIM, q.fim, 'h:mm'); tm(C_VOL, q.volta, '[h]:mm');
+    const both = (q.ini === null) === (q.fim === null);     // só início ou só fim: valor fixo (o trabalho não conta)
+    put(r, C_INT, Object.assign(both ? { f: 'MOD(' + L(C_FIM) + r + '-' + L(C_INI) + r + ',1)+' + L(C_IDA) + r + '+' + L(C_VOL) + r } : {}, { n: q.total / 1440, st: sty(C_INT, { fmt: '[h]:mm' }) }));
+    put(r, C_HD, { f: L(C_INT) + r + '*24', n: q.total / 60, st: sty(C_HD, { fmt: '0.00' }) });
+    tecs.forEach((n, j) => put(r, C_P + j, { n: (q.per[n] || 0) / 60, st: S.style({ fmt: '0.00', fill: XC.cellFill, bd: bd(r, C_P + j) }) }));
   });
 
   // totais
   const T1 = RN + 1, T2 = RN + 2, lab = S.style({ color: XC.blue, wrap: 1 }), val = S.style({ color: XC.blue, fmt: '0.00' });
-  put(T1, 4, { s: 'Total de Horas\nna quinzena:', st: lab }); put(T2, 4, { s: 'Total de Diárias\nna quinzena:', st: lab });
+  put(T1, C_VOL, { s: 'Total de Horas\nna quinzena:', st: lab }); put(T2, C_VOL, { s: 'Total de Diárias\nna quinzena:', st: lab });
+  merges.push(L(C_VOL) + T1 + ':' + L(C_INT) + T1, L(C_VOL) + T2 + ':' + L(C_INT) + T2);
   heights[T1] = 30; heights[T2] = 30;
   const sumCol = c => { let s = 0; bloco.forEach((q, k) => { const cell = rows[R0 + k][c]; s += cell.n || 0; }); return Math.round(s * 100) / 100; };
-  for (let c = 5; c <= lastCol; c++) {
-    const L = colName(c), desc = c === 5 && ovl ? Math.round(ovl / 60 * 100) / 100 : 0, tot = Math.round(((bloco.length ? sumCol(c) : 0) - desc) * 100) / 100;
-    put(T1, c, { f: bloco.length ? 'SUM(' + L + R0 + ':' + L + RN + ')' + (desc ? '-' + desc : '') : '0', n: tot, st: val });
-    put(T2, c, { f: L + T1 + '/8', n: tot / 8, st: val });
+  for (let c = C_HD; c <= lastCol; c++) {
+    const desc = c === C_HD && ovl ? Math.round(ovl / 60 * 100) / 100 : 0, tot = Math.round(((bloco.length ? sumCol(c) : 0) - desc) * 100) / 100;
+    put(T1, c, { f: bloco.length ? 'SUM(' + L(c) + R0 + ':' + L(c) + RN + ')' + (desc ? '-' + desc : '') : '0', n: tot, st: val });
+    put(T2, c, { f: L(c) + T1 + '/8', n: tot / 8, st: val });
   }
 
   if (ovl) put(T2 + 1, 0, { s: 'Total de Horas: horários sobrepostos no mesmo dia contam uma vez (descontado ' + blk.ovls.map(o => hmStr(o.min) + ' em ' + isoToTxt(o.data, false).slice(0, 5)).join(', ') + ').', st: S.style({ h: 'left', color: '404040', sz: 9 }) });
@@ -133,7 +141,7 @@ function sheetXml(d, tecs, blk, nBloco, totBlocos, S) {
     if (x.s !== undefined && x.s !== '') return '<c r="' + ref + '"' + st + ' t="inlineStr"><is><t xml:space="preserve">' + xesc(x.s) + '</t></is></c>';
     return '<c r="' + ref + '"' + st + '/>';
   };
-  const widths = [9, 15, 10, 10, 13, 15, ...tecs.map(n => Math.max(12, Math.min(28, n.length * 1.15 + 3)))];
+  const widths = [9, 15, 12, 9, 9, 13.5, 11, 15, ...tecs.map(n => Math.max(12, Math.min(28, n.length * 1.15 + 3)))];
   let sd = '';
   for (const r of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
     sd += '<row r="' + r + '"' + (heights[r] ? ' ht="' + heights[r] + '" customHeight="1"' : '') + '>';

@@ -1,6 +1,6 @@
 // Service worker: guarda o app no aparelho para funcionar sem internet.
 // Ao publicar uma versão nova, mude o número abaixo (e APP_VERSION no app.js).
-const CACHE = 'rapport-delta-v1.1.1';
+const CACHE = 'rapport-delta-v1.1.2';
 const FILES = ['./', 'index.html', 'app.css', 'app.js', 'xlsx.js', 'pdf-lib.min.js', 'manifest.webmanifest', 'logo.png',
   'icons2/dl-192.png', 'icons2/dl-512.png', 'icons2/dl-180.png', 'icons2/dl-maskable-512.png'];
 // cache: 'reload' = baixa da internet, sem usar o cache do navegador (senão a versão nova pode guardar arquivos velhos)

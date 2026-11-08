@@ -52,6 +52,7 @@
     <button data-tab="horas"><span data-icon="clock"></span><span>Horas</span><i class="cnt" id="cntHoras"></i></button>
     <button data-tab="relatorio"><span data-icon="note"></span><span>Relatório</span><i class="cnt" id="cntRelatorio"></i></button>
     <button data-tab="material"><span data-icon="box"></span><span>Material</span><i class="cnt" id="cntMaterial"></i></button>
+    <button data-tab="custos"><span data-icon="money"></span><span>Custos</span><i class="cnt" id="cntCustos"></i></button>
     <button data-tab="assinar"><span data-icon="pen"></span><span>Assinar</span><i class="cnt ok" id="cntAssinar"></i></button>
   </nav>
   <div class="content" id="edContent">
@@ -60,6 +61,7 @@
     <div class="tab" id="tab-horas" hidden></div>
     <div class="tab" id="tab-relatorio" hidden></div>
     <div class="tab" id="tab-material" hidden></div>
+    <div class="tab" id="tab-custos" hidden></div>
     <div class="tab" id="tab-assinar" hidden></div>
   </div>
   <footer class="actions">
@@ -100,9 +102,13 @@
 <div id="toast" role="status"></div>
 <input type="file" id="fImport" accept=".pdf,.json,application/pdf,application/json" hidden>
 <input type="file" id="fSig" accept="image/*" hidden>
+<input type="file" id="fNota" accept="image/*" hidden>
+<input type="file" id="fCam" accept="image/*" capture="environment" hidden>
 
 <script src="pdf-lib.min.js"></script>
+<script src="ocr/tesseract.min.js"></script>
 <script src="xlsx.js"></script>
+<script src="custos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

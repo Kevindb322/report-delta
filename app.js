@@ -4,7 +4,7 @@
    as páginas são criadas sozinhas. O JSON do relatório vai embutido no PDF (chave RapportDeltafrigoData),
    então dá para reabrir e editar qualquer PDF gerado aqui, no PC ou no celular. */
 
-const APP_VERSION = '1.1.2';
+const APP_VERSION = '1.2.0';
 const PW = 595.276, PH = 841.89;
 const DATA_KEY = 'RapportDeltafrigoData';
 const LOGO_RATIO = 2400 / 355;
@@ -34,6 +34,7 @@ const ICONS = {
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>', later: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   up: '<path d="M18 15l-6-6-6 6"/>',
   sheet: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/>',
+  money: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 12h.01M18 12h.01"/>',
   dots: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.2-2.4 3.7M12 17h.01"/>'
@@ -85,13 +86,15 @@ const parseNum = v => { const s = String(v || '').trim().replace(/\./g, '').repl
 /* ------------------------------------------------------------------ modelo de dados
    doc = { _programa, _versao, head{cliente,end1,end2,end3,data,obra,tecResp,numero,sistema},
            equipe[nomes], tempos[{data,tecs[],ida,ini,fim,volta,km}], relatorio[linhas],
-           material[{qtd,desc,cod,preco}], sig{tecnico,cliente}, fileName } */
+           material[{qtd,desc,cod,preco}], sig{tecnico,cliente}, fileName,
+           custos{exterior,moedaLocal,moedaUsada,itens[]} (ver custos.js) } */
 function blankDoc() {
   return {
     _programa: 'Relatório Deltafrigo', _versao: 1,
     head: { cliente: '', end1: '', end2: '', end3: '', data: todayISO(), obra: '', tecResp: pref('tecResp') || '',
             numero: todayISO().split('-').reverse().join(''), sistema: '' },
-    equipe: [], tempos: [], relatorio: [], material: [], sig: { tecnico: null, cliente: null }, fileName: '', avisoDatas: 0
+    equipe: [], tempos: [], relatorio: [], material: [], sig: { tecnico: null, cliente: null }, fileName: '', avisoDatas: 0,
+    custos: blankCustos()
   };
 }
 function normDoc(j) {                // aceita JSON de outra versão / incompleto
@@ -106,6 +109,7 @@ function normDoc(j) {                // aceita JSON de outra versão / incomplet
   d.sig = { tecnico: (j.sig || {}).tecnico || null, cliente: (j.sig || {}).cliente || null };
   d.fileName = j.fileName || '';
   d.avisoDatas = +j.avisoDatas || 0;
+  d.custos = normCustos(j.custos);           // Custos de viagem (custos.js)
   return d;
 }
 const emptyMat = m => !['qty', 'qtd', 'desc', 'cod', 'preco'].some(k => String(m[k] || '').trim());
@@ -430,6 +434,60 @@ function layoutDoc(d, imgs) {
     T(x + sw / 2, y + sigH + 11, lb, 8.5, { f: 'I', c: LBL, a: 'c' });
   });
   if (d.head.tecResp && d.head.tecResp.trim()) T(ML + sw + 30 + sw / 2, y + sigH + 21, d.head.tecResp.trim(), 7.5, { a: 'c', c: '#333333' });
+  y += sigH + 34;
+
+  // ---- Custos de viagem (anexo, depois das assinaturas): tabela + folhas com as notas em 3 colunas
+  const cst = d.custos;
+  if (cst && cst.exterior !== null && cst.itens.length) {
+    const its = cstItens(cst), two = cstDupla(cst), cl = cstLocal(cst), t = cstTotais(cst);
+    const comNota = its.filter(it => it.img && imgs && imgs['n_' + it.id]); const anexo = new Map(comNota.map((it, k) => [it, k + 1]));
+    const cols = [{ w: 44, h: 'Data', a: 'c' }, { h: 'Descrição', wrap: true }, { w: 46, h: 'Nota', a: 'c' }];
+    if (two) cols.push({ w: 96, h: 'Valor\nMoeda local (' + cst.moedaLocal + ')', a: 'r' }, { w: 104, h: 'Valor\nMoeda utilizada (' + cst.moedaUsada + ')', a: 'r' });
+    else cols.push({ w: 104, h: 'Valor (' + (cl === 'BRL' ? 'R$' : cl) + ')', a: 'r' });
+    const rows = its.map(it => { const r = [isoToTxt(it.data, false), it.desc.trim() || '-', anexo.has(it) ? 'Anexo ' + anexo.get(it) : '-', fmtMoney(it.vLocal, cl) || '-'];
+      if (two) r.push(fmtMoney(it.vUsado, cst.moedaUsada) || '-'); return r; });
+    table('Custos de viagem', cols, rows, { after: 22 });
+    const xv = ML + cols.slice(0, 3).reduce((s, c) => s + c.w + 1.6, 0);
+    T(ML, y + 11, cst.exterior ? 'Total gasto na viagem' : 'Total em reais', 8.5, { f: 'I', c: LBL, u: true });
+    box(xv, y + 1, cols[3].w, 15, fmtMoney(t.local, cl), { a: 'r', f: 'B' });
+    if (two) box(xv + cols[3].w + 1.6, y + 1, cols[4].w, 15, fmtMoney(t.usado, cst.moedaUsada), { a: 'r', f: 'B' });
+    y += 24;
+    const notes = [cst.exterior ? 'Serviço no exterior. Moeda local: ' + cst.moedaLocal + ' (' + MOEDAS[cst.moedaLocal].nome + ')' + (two ? '; moeda utilizada: ' + cst.moedaUsada + ' (' + MOEDAS[cst.moedaUsada].nome + '), valor cobrado de fato (com a taxa do banco).' : '.') : 'Serviço no Brasil: valores em reais.'];
+    if (comNota.length) notes.push(comNota.length === its.length ? 'As notas de todos os gastos estão nas folhas seguintes (Anexos).' : 'Gastos com "Anexo n" têm a nota nas folhas seguintes; os marcados com "-" não têm nota.');
+    if (t.faltaLocal || t.faltaUsado) notes.push('Gastos sem valor não entram no total.');
+    for (const n of notes) { const ls = wrap(n, 7.2, CW, 'I'); if (!room(ls.length * 9 + 2)) newPage(); for (const l of ls) { T(ML, y + 7, l, 7.2, { f: 'I', c: '#444444' }); y += 9; } y += 2; }
+
+    // notas: 3 colunas, todas com a largura de 1 coluna (cupons na mesma escala). Enche coluna por coluna: empilha na coluna
+    // atual enquanto ela não passar (com folga) da mais alta; senão passa para a próxima, e depois da 3ª volta para a 1ª.
+    // Nenhuma aceita: vai na mais baixa. Não cabe na folha: folha nova.
+    if (comNota.length) {
+      const NC = 3, gp = 10, HH = 36, colW = (CW - (NC - 1) * gp) / NC, FOLGA = 1.15, HEAD = '#e8ecf7';
+      let top = 0, col = 0, colY = [];
+      const folha = () => { newPage(); heading('Custos de viagem — notas'); top = y + 2; col = 0; colY = Array(NC).fill(top); };
+      folha();
+      for (const it of comNota) {
+        const im = imgs['n_' + it.id], maxImgH = BOTTOM - top - HH - 4;
+        let iw = colW, ih = colW * im.h / im.w; if (ih > maxImgH) { ih = maxImgH; iw = ih * im.w / im.h; }
+        const h = HH + ih + 2;
+        const escolhe = () => {
+          const ref = Math.max(...colY) - top;
+          for (let k = 0; k < NC; k++) { const c = (col + k) % NC, alt = colY[c] - top; if (colY[c] + h <= BOTTOM && (alt === 0 || alt + h <= ref * FOLGA)) return c; }
+          let c = -1; for (let k = 0; k < NC; k++) if (colY[k] + h <= BOTTOM && (c < 0 || colY[k] < colY[c])) c = k;
+          return c;
+        };
+        let c = escolhe(); if (c < 0) { folha(); c = 0; }
+        col = c; const x = ML + c * (colW + gp), yy = colY[c]; colY[c] = yy + h + gp;
+        const val = [fmtMoney(it.vLocal, cl), two && it.vUsado !== null ? fmtMoney(it.vUsado, cst.moedaUsada) : ''].filter(Boolean).join(' / ');
+        R(x, yy, colW, HH - 2, { fill: HEAD });
+        T(x + 4, yy + 10, 'Anexo ' + anexo.get(it) + '  ·  ' + isoToTxt(it.data, true), 7.5, { f: 'B' });
+        if (val) T(x + 4, yy + 20, val, fitSize(clean(val), 7.5, colW - 8, 'B', 5), { f: 'B' });
+        T(x + 4, yy + 30, wrap(it.desc.trim() || '-', 7, colW - 8)[0], 7, { c: '#555555' });
+        const ix = x + (colW - iw) / 2, iy = yy + HH;
+        ops.push({ k: 'img', src: 'n_' + it.id, x: ix, y: iy, w: iw, h: ih });
+        R(ix, iy, iw, ih, { lw: 0.4 });
+      }
+    }
+  }
 
   // números de página
   const n = pages.length;
@@ -447,6 +505,8 @@ async function imgSize(src) { const im = new Image(); im.src = src; try { await 
 async function sigImgs(d) {
   const o = {};
   for (const k of ['cliente', 'tecnico']) if (d.sig[k]) o[k] = Object.assign({ src: d.sig[k] }, await imgSize(d.sig[k]));
+  // notas dos Custos de viagem (só quando a parte de custos sai no PDF)
+  if (d.custos && d.custos.exterior !== null) for (const it of d.custos.itens) if (it.img) o['n_' + it.id] = { src: it.img, w: it.imgW || 1, h: it.imgH || 1 };
   return o;
 }
 
@@ -459,7 +519,7 @@ async function buildPdf(d) {
   const F = { R: await out.embedFont(StandardFonts.Helvetica), B: await out.embedFont(StandardFonts.HelveticaBold),
               I: await out.embedFont(StandardFonts.HelveticaOblique), BI: await out.embedFont(StandardFonts.HelveticaBoldOblique) };
   const E = { logo: await out.embedPng(LOGO) };
-  for (const k of Object.keys(imgs)) E[k] = await out.embedPng(dataUrlBytes(imgs[k].src));
+  for (const k of Object.keys(imgs)) E[k] = /^data:image\/jpe?g/.test(imgs[k].src) ? await out.embedJpg(dataUrlBytes(imgs[k].src)) : await out.embedPng(dataUrlBytes(imgs[k].src));
   for (const ops of pages) {
     const pg = out.addPage([PW, PH]);
     for (const o of ops) {
@@ -478,6 +538,9 @@ async function buildPdf(d) {
   }
   out.setTitle(fileNameOf(d)); out.setAuthor('Deltafrigo Ltda.'); out.setProducer('Relatório Deltafrigo ' + APP_VERSION); out.setLanguage('pt-BR');
   const data = Object.assign({}, d, { _programa: 'Relatório Deltafrigo', _versao: 1, _app: APP_VERSION });
+  // notas: no JSON vai só o nº do objeto da imagem que já está no PDF (não duplica a imagem em texto)
+  if (d.custos) data.custos = Object.assign({}, d.custos, { itens: d.custos.itens.map(it => {
+    const e = E['n_' + it.id]; return Object.assign({}, it, { ocr: null }, e ? { img: null, imgObj: e.ref.objectNumber } : {}); }) });
   out.getInfoDict().set(PDFName.of(DATA_KEY), PDFHexString.fromText(JSON.stringify(data)));
   return { bytes: await out.save(), pages: pages.length };
 }
@@ -487,7 +550,17 @@ async function readFileData(file) {
   const pdf = await PDFLib.PDFDocument.load(bytes, { updateMetadata: false });
   const v = pdf.getInfoDict().lookup(PDFLib.PDFName.of(DATA_KEY));
   if (!v) throw new Error('este PDF não foi feito pelo Relatório Deltafrigo');
-  return { data: JSON.parse(v.decodeText()), pdf: new Blob([bytes], { type: 'application/pdf' }) };
+  const data = JSON.parse(v.decodeText());
+  // notas dos Custos de viagem: a imagem é lida do próprio PDF (objeto JPEG guardado em imgObj)
+  if (data.custos && Array.isArray(data.custos.itens)) for (const it of data.custos.itens) {
+    if (it.img || !it.imgObj) continue;
+    try {
+      const st = pdf.context.lookup(PDFLib.PDFRef.of(it.imgObj, 0));
+      const f = st && st.dict && st.dict.get(PDFLib.PDFName.of('Filter'));
+      if (st && st.contents && f && String(f) === '/DCTDecode') { let s = ''; const u = st.contents; for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768)); it.img = 'data:image/jpeg;base64,' + btoa(s); }
+    } catch (e) { console.warn('nota', it.imgObj, e); }
+  }
+  return { data, pdf: new Blob([bytes], { type: 'application/pdf' }) };
 }
 
 /* ------------------------------------------------------------------ visualização (SVG com as mesmas operações) */
@@ -622,7 +695,7 @@ function itemMenu(r) {
       (!r.pdf || r.status === 'draft') && opt('', 'save', 'Salvar PDF e enviar', null, () => { hideSheet(); replaceTop('editor'); openEditor(r); saveFlow(); }),
       r.pdf && opt('', 'save', IS_PC ? 'Salvar o PDF de novo' : 'Baixar o PDF de novo', null, async () => { const x = await saveToDevice(r, true); if (x.ok) { back(); toast(savedMsg(x, fileNameOf(r.doc) + '.pdf')); } }),
       hasHours(r.doc) && opt('', 'sheet', 'Planilha Excel', 'Horas e diárias no modelo da quinzena: salvar ou enviar', () => xlsxMenu(r)),
-      opt('', 'copy', 'Duplicar', 'Copia cliente, equipe e dados; limpa assinaturas', () => duplicate(r)),
+      opt('', 'copy', 'Duplicar', 'Copia cliente, equipe e dados; limpa assinaturas e custos', () => duplicate(r)),
       opt('danger', 'trash', 'Excluir', null, () => confirmDelete(r))),
     el('button', { class: 'cancel', onclick: back }, 'Cancelar')
   ]);
@@ -634,6 +707,7 @@ function opt(cls, ic, title, sub, fn) {
 async function duplicate(r) {
   const d = normDoc(JSON.parse(JSON.stringify(r.doc)));
   d.sig = { tecnico: null, cliente: null }; d.fileName = ''; d.head.data = todayISO(); d.head.numero = todayISO().split('-').reverse().join('');
+  d.custos.itens = [];                       // gastos são da viagem: não copia (mantém só exterior/moedas)
   const rec = { id: newId(), created: Date.now(), updated: Date.now(), status: 'draft', doc: d, pdf: null };
   await DB.put(rec); hideSheet(); replaceTop('editor'); openEditor(rec); toast('Relatório duplicado.');
 }
@@ -646,7 +720,7 @@ function confirmDelete(r) {
 
 /* ------------------------------------------------------------------ editor */
 let cur = null, tab = 'dados', saveT = null;
-const TABS = ['dados', 'equipe', 'horas', 'relatorio', 'material', 'assinar'];
+const TABS = ['dados', 'equipe', 'horas', 'relatorio', 'material', 'custos', 'assinar'];
 async function newReport() {
   const d = blankDoc();
   try { d.equipe = JSON.parse(pref('ultimaEquipe') || '[]'); } catch (e) {}
@@ -669,12 +743,13 @@ function showTab(name) {
   for (const s of TABS) $('tab-' + s).hidden = s !== name;
   const b = $('tabs').querySelector('[data-tab="' + name + '"]'); if (b) b.scrollIntoView({ inline: 'center', block: 'nearest' });
   if (name === 'horas') renderHoras();          // a equipe pode ter mudado
+  if (name === 'custos') renderCustos();        // leitura de nota pode ter terminado em segundo plano
   if (name === 'relatorio') for (const ta of $('tab-relatorio').querySelectorAll('textarea')) if (ta.fit) ta.fit();
   window.scrollTo(0, 0);
 }
 function renderEditor() {
   if (!cur) return;
-  renderDados(); renderEquipe(); renderHoras(); renderRelatorio(); renderMaterial(); renderAssinar(); updateBadges();
+  renderDados(); renderEquipe(); renderHoras(); renderRelatorio(); renderMaterial(); renderCustos(); renderAssinar(); updateBadges();
 }
 function updateBadges() {
   if (!cur) return;
@@ -685,6 +760,7 @@ function updateBadges() {
   $('cntHoras').textContent = c.rows.filter(r => r.total !== null).length || '';
   $('cntRelatorio').textContent = d.relatorio.filter(l => String(l).trim()).length || '';
   $('cntMaterial').textContent = d.material.filter(m => !emptyMat(m)).length || '';
+  $('cntCustos').textContent = (d.custos && d.custos.exterior !== null && d.custos.itens.length) || '';
   const ns = (d.sig.tecnico ? 1 : 0) + (d.sig.cliente ? 1 : 0);
   $('cntAssinar').textContent = ns ? ns + '/2' : '';
 }
@@ -943,6 +1019,7 @@ function renderAssinar() {
       el('button', { type: 'button', onclick: () => $('fSig').click() }, saved ? 'Trocar imagem salva' : 'Escolher imagem da assinatura'),
       d.sig.tecnico && el('button', { type: 'button', onclick: () => { d.sig.tecnico = null; touch(); renderAssinar(); } }, 'Remover assinatura')));
 }
+for (const id of ['fNota', 'fCam']) $(id).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) cstArquivo(f); });
 $('fSig').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   const url = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(f); });
@@ -1167,7 +1244,7 @@ function shareFail(rec, via, e, final) {
    Nesse caso a planilha é salva (Downloads ou a pasta do PC) e o app explica como anexar à mão.
    No Safari (iPhone) ela vai anexada junto com o PDF. */
 const XLSX_SHARE = (() => { try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'a.xlsx', { type: XLSX_MIME })] })); } catch (e) { return false; } })();
-const hasHours = d => workDates(d).length > 0;
+const hasHours = d => workDates(d).length > 0 || !!(d.custos && d.custos.exterior !== null && d.custos.itens.length);   // tem o que pôr na planilha
 const wantXlsx = rec => pref('anexaXlsx') === '1' && hasHours(rec.doc);
 function xlsxCheck() {
   const cb = el('input', { type: 'checkbox' }); cb.checked = pref('anexaXlsx') === '1';

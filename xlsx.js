@@ -4,6 +4,7 @@
    Embaixo: "Total de Horas na quinzena" e "Total de Diárias na quinzena" (8 h = 1 diária), com fórmulas.
    Uma aba para cada 15 datas (a mesma contagem do fechamento do app: datas com horas + domingos automáticos).
    O .xlsx é montado aqui mesmo (XML + zip sem compressão), sem biblioteca externa, para funcionar offline.
+   Aba 'Custos' quando o relatório tem Custos de viagem (custos.js).
    Usa funções do app.js: calcAll, workDates, tecSummary, isSunday, isoToTxt, fileNameOf, BLOCO_DATAS. */
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -158,6 +159,55 @@ function sheetXml(d, tecs, blk, nBloco, totBlocos, S) {
     '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>';
 }
 
+/* ---------------- aba Custos de viagem */
+const XLS_FMT = { CLP: '#,##0 "CLP"', USD: '#,##0.00 "USD"', EUR: '#,##0.00 "EUR"', BRL: '"R$" #,##0.00' };
+function custosSheetXml(d, S) {
+  const c = d.custos, its = cstItens(c), two = cstDupla(c), cl = cstLocal(c);
+  let k = 0; const anexo = new Map(its.filter(it => it.img || it.imgObj).map(it => [it, ++k]));
+  const rows = {}, merges = [], heights = {}, put = (r, col, cell) => { (rows[r] = rows[r] || [])[col] = cell; };
+  const last = two ? 4 : 3, TOP = 4, H2 = two ? 5 : 4, R0 = H2 + 1, RN = R0 + its.length - 1;
+  const vThick = col => col === 0 || col === 3 || col === last + 1;
+  const bd = (r, col) => [vThick(col) ? 'medium' : 'thin', vThick(col + 1) ? 'medium' : 'thin', r === TOP ? 'medium' : 'thin', (r === H2 || r === RN) ? 'medium' : 'thin'];
+  const h = d.head;
+  put(1, 0, { s: ['Custos de viagem', h.cliente.trim(), h.numero.trim() && 'Relatório nº ' + h.numero.trim()].filter(Boolean).join('   ·   '), st: S.style({ b: 1, sz: 12, h: 'left' }) });
+  put(2, 0, { s: c.exterior ? 'Serviço no exterior · Moeda local: ' + c.moedaLocal + ' (' + MOEDAS[c.moedaLocal].nome + ')' + (two ? ' · Moeda utilizada: ' + c.moedaUsada + ' (' + MOEDAS[c.moedaUsada].nome + ')' : '') : 'Serviço no Brasil · valores em reais', st: S.style({ h: 'left', color: '404040' }) });
+  const hd = (r, col, txt, fill) => put(r, col, { s: txt, st: S.style({ b: 1, fill, bd: bd(r, col) }) });
+  ['Data', 'Descrição', 'Nota'].forEach((t, col) => { hd(TOP, col, t, XC.yellow); if (two) { hd(H2, col, '', XC.yellow); merges.push(colName(col) + TOP + ':' + colName(col) + H2); } });
+  if (two) { hd(TOP, 3, 'Valor', XC.cyan); hd(TOP, 4, '', XC.cyan); merges.push('D' + TOP + ':E' + TOP); hd(H2, 3, 'Moeda local (' + c.moedaLocal + ')', XC.blueGray); hd(H2, 4, 'Moeda utilizada (' + c.moedaUsada + ')', XC.pink); }
+  else hd(TOP, 3, 'Valor (' + (cl === 'BRL' ? 'R$' : cl) + ')', XC.cyan);
+  its.forEach((it, i) => {
+    const r = R0 + i;
+    put(r, 0, it.data ? { n: excelDate(it.data), st: S.style({ fmt: 'dd/mm/yyyy', bd: bd(r, 0) }) } : { st: S.style({ bd: bd(r, 0) }) });
+    put(r, 1, { s: it.desc.trim() || '-', st: S.style({ h: 'left', bd: bd(r, 1) }) });
+    put(r, 2, { s: anexo.has(it) ? 'Anexo ' + anexo.get(it) : '-', st: S.style({ bd: bd(r, 2), color: anexo.has(it) ? '000000' : '808080' }) });
+    put(r, 3, it.vLocal === null ? { st: S.style({ bd: bd(r, 3) }) } : { n: it.vLocal, st: S.style({ fmt: XLS_FMT[cl], h: 'right', bd: bd(r, 3) }) });
+    if (two) put(r, 4, it.vUsado === null ? { st: S.style({ bd: bd(r, 4) }) } : { n: it.vUsado, st: S.style({ fmt: XLS_FMT[c.moedaUsada], h: 'right', bd: bd(r, 4) }) });
+  });
+  const T = RN + 1, t = cstTotais(c);
+  put(T, 2, { s: c.exterior ? 'Total gasto na viagem:' : 'Total em reais:', st: S.style({ b: 1, h: 'right', color: XC.blue }) });
+  put(T, 3, { f: 'SUM(D' + R0 + ':D' + RN + ')', n: t.local, st: S.style({ b: 1, fmt: XLS_FMT[cl], h: 'right', color: XC.blue }) });
+  if (two) put(T, 4, { f: 'SUM(E' + R0 + ':E' + RN + ')', n: t.usado, st: S.style({ b: 1, fmt: XLS_FMT[c.moedaUsada], h: 'right', color: XC.blue }) });
+  heights[TOP] = 18; if (two) heights[H2] = 18; heights[T] = 20;
+  const cellXml = (r, col, x) => {
+    const ref = colName(col) + r, st = x.st ? ' s="' + x.st + '"' : '';
+    if (x.f !== undefined) return '<c r="' + ref + '"' + st + '><f>' + xesc(x.f) + '</f><v>' + x.n + '</v></c>';
+    if (x.n !== undefined) return '<c r="' + ref + '"' + st + '><v>' + x.n + '</v></c>';
+    if (x.s !== undefined && x.s !== '') return '<c r="' + ref + '"' + st + ' t="inlineStr"><is><t xml:space="preserve">' + xesc(x.s) + '</t></is></c>';
+    return '<c r="' + ref + '"' + st + '/>';
+  };
+  const widths = [12, 42, 11, 22, 24].slice(0, last + 1);
+  let sd = '';
+  for (const r of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
+    sd += '<row r="' + r + '"' + (heights[r] ? ' ht="' + heights[r] + '" customHeight="1"' : '') + '>';
+    rows[r].forEach((x, col) => { if (x) sd += cellXml(r, col, x); }); sd += '</row>';
+  }
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:' + colName(last) + T + '"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>' +
+    '<cols>' + widths.map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join('') + '</cols>' +
+    '<sheetData>' + sd + '</sheetData>' + (merges.length ? '<mergeCells count="' + merges.length + '">' + merges.map(m => '<mergeCell ref="' + m + '"/>').join('') + '</mergeCells>' : '') +
+    '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/></worksheet>';
+}
+
 /* ---------------- zip (sem compressão) */
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
@@ -193,6 +243,8 @@ function buildXlsx(d) {
   if (!blocos.length) blocos.push({ lines: [], ovls: [] });
   const sheets = blocos.map((b, i) => sheetXml(d, tecs, b, i + 1, blocos.length, S));
   const names = blocos.map((b, i) => blocos.length > 1 ? 'Quinzena ' + (i + 1) : 'Quinzena');
+  // aba Custos de viagem (quando o relatório tem gastos)
+  if (d.custos && d.custos.exterior !== null && d.custos.itens.length) { sheets.push(custosSheetXml(d, S)); names.push('Custos'); }
   const enc = new TextEncoder(), X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   const files = [
     { name: '[Content_Types].xml', xml: X + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +

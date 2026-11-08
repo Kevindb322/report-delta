@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2a8a">
+<title>Teste – Custos de viagem</title>
+<link rel="icon" type="image/png" href="../icons2/dl-192.png">
+<link rel="stylesheet" href="custos.css">
+</head>
+<body>
+<header class="appbar">
+  <img class="applogo" src="../icons2/dl-192.png" alt="">
+  <div class="title"><b>Custos de viagem</b><small>Versão de teste · fora do Relatório Deltafrigo</small></div>
+</header>
+
+<main class="content">
+  <div class="testbox">Teste separado do app. Os dados ficam só neste aparelho e não aparecem nos relatórios.</div>
+
+  <section class="card">
+    <h3>Relatório</h3>
+    <div class="row2">
+      <label class="f"><span>Cliente</span><input id="cliente" autocomplete="off"></label>
+      <label class="f"><span>Nº do relatório</span><input id="numero" autocomplete="off" inputmode="numeric"></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>O serviço foi realizado no exterior?</h3>
+    <div class="seg" id="segExt">
+      <button type="button" data-v="0">Não, no Brasil</button>
+      <button type="button" data-v="1">Sim, no exterior</button>
+    </div>
+    <div id="moedas" hidden>
+      <div class="lbl">Moeda local <small>(a moeda da nota)</small></div>
+      <div class="seg cur" id="segLocal"></div>
+      <div class="lbl">Moeda utilizada <small>(a moeda cobrada no cartão ou paga)</small></div>
+      <div class="seg cur" id="segUsada"></div>
+    </div>
+    <p class="hint" id="hintMoeda"></p>
+  </section>
+
+  <section id="gastosSec" hidden>
+    <div class="sechead"><h2>Gastos</h2><span id="cntGastos"></span></div>
+    <div id="gastos"></div>
+    <div class="addrow">
+      <button type="button" class="big primary" id="bFoto"><span class="ic">📷</span><span>Adicionar nota<small>foto ou imagem da galeria</small></span></button>
+      <button type="button" class="big" id="bManual"><span class="ic">✎</span><span>Adicionar sem nota<small>só descrição e valor</small></span></button>
+    </div>
+    <section class="card totals" id="totais"></section>
+  </section>
+
+  <p class="foot">Teste "Custos de viagem" · v0.1 · <button type="button" class="link" id="bLimpar">apagar tudo</button></p>
+</main>
+
+<footer class="actions" id="actions" hidden>
+  <button type="button" class="secondary" id="bVer">Visualizar PDF</button>
+  <button type="button" class="primary" id="bPdf">Salvar / enviar PDF</button>
+</footer>
+
+<div id="toast" role="status"></div>
+<div id="scrim" hidden></div>
+<div id="sheet" class="sheet" hidden></div>
+<input type="file" id="fFoto" accept="image/*" hidden>
+
+<script src="../pdf-lib.min.js"></script>
+<script src="ocr/tesseract.min.js"></script>
+<script src="custos.js"></script>
+</body>
+</html>

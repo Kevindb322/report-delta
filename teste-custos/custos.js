@@ -390,44 +390,33 @@ async function buildPdf() {
     notas.forEach(n => { T(n, ML, y, 7.5, { c: GRAY }); y += 10; });
   }
 
-  // folhas das notas: por data, sem assinaturas, montadas sozinhas (encaixe modular).
-  // Grade de 3 colunas: nota em pé (cupom, qualquer comprimento) ocupa 1 coluna, assim todos os cupons ficam na mesma escala
-  // (o papel térmico tem sempre ~8 cm); imagem deitada (print do banco, foto de lado) ocupa 2 colunas.
-  // Vai colocando lado a lado; quando não cabe mais na largura, desce para a próxima "linha", que começa
-  // logo abaixo da nota mais baixa daquele trecho (sem deixar buraco embaixo das notas curtas). Não cabe na folha: folha nova.
+  // folhas das notas: por data, sem assinaturas, montadas sozinhas em 3 colunas (todas as notas com a largura de 1 coluna,
+  // assim todos os cupons ficam na mesma escala; o papel térmico tem sempre ~8 cm).
+  // Enche coluna por coluna, de cima para baixo, como jornal: empilha na coluna atual enquanto ela não passar
+  // (com uma folga) da coluna mais alta; senão passa para a próxima coluna, e depois da 3ª volta para a 1ª.
+  // Se nenhuma coluna aceitar, vai na mais baixa. Não cabe mais na folha: folha nova.
   if (comNota.length) {
-    const gap = 10, HH = 36, bottom = PH - 30;
-    let sky = null, top = 0;
-    const novaFolha = () => { header('CUSTOS DE VIAGEM – NOTAS', true); top = y + 2; sky = [{ x: ML, w: CW, y: top }]; };
-    // menor altura onde um bloco de largura w cabe, testando o começo de cada trecho do "horizonte"
-    const lugar = w => {
-      let best = null;
-      for (const sg of sky) {
-        const x = sg.x; if (x + w > MR + 0.01) continue;
-        let yy = 0; for (const o of sky) if (o.x < x + w - 0.01 && o.x + o.w > x + 0.01) yy = Math.max(yy, o.y);
-        if (!best || yy < best.y - 0.01) best = { x, y: yy };
-      }
-      return best;
-    };
-    const ocupa = (x, w, yy) => {           // sobe o horizonte no trecho [x, x+w]
-      const out = [];
-      for (const o of sky) {
-        if (o.x + o.w <= x + 0.01 || o.x >= x + w - 0.01) { out.push(o); continue; }
-        if (o.x < x) out.push({ x: o.x, w: x - o.x, y: o.y });
-        if (o.x + o.w > x + w) out.push({ x: x + w, w: o.x + o.w - x - w, y: o.y });
-      }
-      out.push({ x, w, y: yy }); out.sort((p, q) => p.x - q.x);
-      sky = out.reduce((acc, o) => { const l = acc[acc.length - 1]; if (l && Math.abs(l.y - o.y) < 0.01 && Math.abs(l.x + l.w - o.x) < 0.01) l.w += o.w; else acc.push(o); return acc; }, []);
-    };
-    const C1 = (CW - 2 * gap) / 3, C2 = 2 * C1 + gap;
-    const medida = (it, colW) => { const maxImgH = bottom - top - HH - 4; let iw = colW, ih = colW * it.imgH / it.imgW; if (ih > maxImgH) { ih = maxImgH; iw = ih * it.imgW / it.imgH; } return { colW, iw, ih, h: HH + ih + 2 }; };
+    const gap = 10, HH = 36, bottom = PH - 30, NC = 3, colW = (CW - (NC - 1) * gap) / NC, FOLGA = 1.15;
+    let top = 0, col = 0, colY = [];
+    const novaFolha = () => { header('CUSTOS DE VIAGEM – NOTAS', true); top = y + 2; col = 0; colY = Array(NC).fill(top); };
+    const medida = it => { const maxImgH = bottom - top - HH - 4; let iw = colW, ih = colW * it.imgH / it.imgW; if (ih > maxImgH) { ih = maxImgH; iw = ih * it.imgW / it.imgH; } return { iw, ih, h: HH + ih + 2 }; };
     novaFolha();
     for (const it of comNota) {
-      const opcoes = it.imgH / it.imgW <= 0.75 ? [C2, C1] : [C1];   // deitada: tenta 2 colunas; se não couber na folha, 1
-      let m = null, p = null;
-      for (const w of opcoes) { const mm = medida(it, w), pp = lugar(w); if (pp && pp.y + mm.h <= bottom) { m = mm; p = pp; break; } }
-      if (!p) { novaFolha(); m = medida(it, opcoes[0]); p = lugar(m.colW); }
-      const { colW, iw, ih, h } = m, x = p.x, yy = p.y;
+      const m = medida(it);
+      const escolhe = () => {
+        const ref = Math.max(...colY) - top;
+        for (let k = 0; k < NC; k++) {
+          const c = (col + k) % NC, alt = colY[c] - top;
+          if (colY[c] + m.h <= bottom && (alt === 0 || alt + m.h <= ref * FOLGA)) return c;
+        }
+        let c = -1; for (let k = 0; k < NC; k++) if (colY[k] + m.h <= bottom && (c < 0 || colY[k] < colY[c])) c = k;
+        return c;
+      };
+      let c = escolhe();
+      if (c < 0) { novaFolha(); c = 0; }
+      col = c;
+      const { iw, ih, h } = m, x = ML + col * (colW + gap), yy = colY[col];
+      colY[col] = yy + h + gap;
       const val = [fmtMoney(it.vLocal, curLocal()), two && it.vUsado !== null ? fmtMoney(it.vUsado, doc.moedaUsada) : ''].filter(Boolean).join(' / ');
       R(x, yy, colW, HH - 2, { fill: HEAD });
       T('Anexo ' + it._anexo + '  ·  ' + isoTxt(it.data), x + 4, yy + 10, 7.5, { b: 1 });
@@ -437,7 +426,6 @@ async function buildPdf() {
       const ix = x + (colW - iw) / 2, iy = yy + HH;
       pg.drawImage(img, { x: ix, y: PH - iy - ih, width: iw, height: ih });
       R(ix, iy, iw, ih, { lw: 0.4 });
-      ocupa(x, Math.min(colW + gap, MR - x), yy + h + gap);
     }
   }
   const n = pdf.getPageCount();

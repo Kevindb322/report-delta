@@ -122,7 +122,9 @@ function renderGastos() {
       el('div', { class: 'top' }, el('label', { class: 'f', style: 'max-width:170px' }, el('span', null, 'Data'), data),
         el('button', { type: 'button', class: 'del', title: 'Excluir', onclick: () => delGasto(it) }, '🗑')),
       el('label', { class: 'f' }, el('span', null, 'Descrição'), desc), vals, chip,
-      !it.img && el('button', { type: 'button', class: 'addnota', onclick: () => pickFoto(it) }, '+ anexar a nota deste gasto'));
+      !it.img && el('div', { class: 'addnotas' }, el('span', null, 'Anexar a nota:'),
+        el('button', { type: 'button', class: 'addnota', onclick: () => pickFoto(it, true) }, '📷 câmera'),
+        el('button', { type: 'button', class: 'addnota', onclick: () => pickFoto(it, false) }, '🖼️ galeria')));
     if (it.img) {
       const th = el('div', { class: 'thumb', style: 'background-image:url(' + it.img + ')', onclick: e => { if (!e.target.closest('.tools')) verNota(it); } },
         el('div', { class: 'tools' }, el('button', { type: 'button', onclick: () => girar(it) }, '⟳'), el('button', { type: 'button', onclick: () => tirarNota(it) }, '✕')));
@@ -157,9 +159,11 @@ function renderTotais() {
 function novoGasto() { return { id: newId(), criado: Date.now(), data: todayISO(), desc: '', vLocal: null, vUsado: null, img: null, imgW: 0, imgH: 0, ocr: null, auto: false, autoUsado: false }; }
 $('bManual').addEventListener('click', () => { const it = novoGasto(); doc.itens.push(it); save(); renderGastos(); toast('Gasto adicionado. Preencha a descrição e o valor.'); });
 let fotoAlvo = null;
-function pickFoto(it) { fotoAlvo = it || null; $('fFoto').click(); }
-$('bFoto').addEventListener('click', () => pickFoto(null));
-$('fFoto').addEventListener('change', async e => {
+// câmera: input com capture (abre direto a câmera traseira); galeria: input sem capture
+function pickFoto(it, cam) { fotoAlvo = it || null; $(cam ? 'fCam' : 'fFoto').click(); }
+$('bCam').addEventListener('click', () => pickFoto(null, true));
+$('bFoto').addEventListener('click', () => pickFoto(null, false));
+for (const id of ['fFoto', 'fCam']) $(id).addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   let it = fotoAlvo; fotoAlvo = null;
   try {

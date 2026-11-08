@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1c2a8a">
 <title>Teste – Custos de viagem</title>
 <link rel="icon" type="image/png" href="../icons2/dl-192.png">
-<link rel="stylesheet" href="custos.css?v=0.3">
+<link rel="stylesheet" href="custos.css?v=0.4">
 </head>
 <body>
 <header class="appbar">
@@ -44,13 +44,14 @@
     <div class="sechead"><h2>Gastos</h2><span id="cntGastos"></span></div>
     <div id="gastos"></div>
     <div class="addrow">
-      <button type="button" class="big primary" id="bFoto"><span class="ic">📷</span><span>Adicionar nota<small>foto ou imagem da galeria</small></span></button>
+      <button type="button" class="big primary" id="bCam"><span class="ic">📷</span><span>Fotografar nota<small>abre a câmera</small></span></button>
+      <button type="button" class="big" id="bFoto"><span class="ic">🖼️</span><span>Nota da galeria<small>foto, print ou imagem salva</small></span></button>
       <button type="button" class="big" id="bManual"><span class="ic">✎</span><span>Adicionar sem nota<small>só descrição e valor</small></span></button>
     </div>
     <section class="card totals" id="totais"></section>
   </section>
 
-  <p class="foot">Teste "Custos de viagem" · v0.3 · <button type="button" class="link" id="bLimpar">apagar tudo</button></p>
+  <p class="foot">Teste "Custos de viagem" · v0.4 · <button type="button" class="link" id="bLimpar">apagar tudo</button></p>
 </main>
 
 <footer class="actions" id="actions" hidden>
@@ -62,9 +63,10 @@
 <div id="scrim" hidden></div>
 <div id="sheet" class="sheet" hidden></div>
 <input type="file" id="fFoto" accept="image/*" hidden>
+<input type="file" id="fCam" accept="image/*" capture="environment" hidden>
 
 <script src="../pdf-lib.min.js"></script>
 <script src="ocr/tesseract.min.js"></script>
-<script src="custos.js?v=0.3"></script>
+<script src="custos.js?v=0.4"></script>
 </body>
 </html>
